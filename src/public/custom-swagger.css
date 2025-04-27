@@ -1,0 +1,47 @@
+/* Estilo global para Swagger UI */
+.swagger-ui {
+    background: #ffffff; /* Fondo oscuro degradado */
+    color: #e0e7ff; /* Texto claro */
+    font-family: 'Inter', 'Roboto', sans-serif; /* Fuente moderna */
+}
+
+.swagger-ui .opblock .opblock-summary{
+    padding: 0;
+}
+
+.swagger-ui .opblock{
+    margin: 0 0 2px;
+}
+
+
+.swagger-ui .opblock.opblock-get .opblock-summary {
+    background: #c7e2fd;
+    
+}
+.swagger-ui .opblock.opblock-post .opblock-summary {
+    background: #9be3c2;
+   
+}
+.swagger-ui .opblock.opblock-put .opblock-summary {
+    background:#fdffe0;
+    
+}
+.swagger-ui .opblock.opblock-delete .opblock-summary {
+    background: #ffcccc;
+    
+}
+.swagger-ui .opblock.opblock-patch .opblock-summary {
+    background: #f0e0ff;   
+}
+
+
+
+.swagger-ui .opblock-tag-section {
+    display: flex;
+    flex-direction: column;
+    background: #efefef;
+    padding: 13px;
+    margin: 10px;
+    border: 1px solid #c7c7c7;
+    border-radius: 15px;
+}
