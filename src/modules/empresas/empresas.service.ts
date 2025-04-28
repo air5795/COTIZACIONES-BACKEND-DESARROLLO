@@ -110,4 +110,16 @@ export class EmpresasService {
     const empresa = await this.findOne(id);
     await this.empresaRepository.delete(id);
   }
+
+  // Método para obtener el tipo de empresa por cod_patronal
+  async findTipoByCodPatronal(codPatronal: string): Promise<string> {
+    const empresa = await this.empresaRepository.findOne({
+      where: { cod_patronal: codPatronal },
+      select: ['tipo'], // Selecciona solo la columna 'tipo'
+    });
+    if (!empresa) {
+      throw new HttpException('Empresa no encontrada', HttpStatus.NOT_FOUND);
+    }
+    return empresa.tipo || 'No especificado';
+  }
 }

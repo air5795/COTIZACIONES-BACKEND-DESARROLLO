@@ -4,7 +4,7 @@ import { CreateEmpresaDto } from './dto/create-empresa.dto';
 import { UpdateEmpresaDto } from './dto/update-empresa.dto';
 import { Empresa } from './entities/empresa.entity';
 import { ApiTags } from '@nestjs/swagger';
-
+import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 @ApiTags('Empresas Afiliadas')
 @Controller('empresas')
 export class EmpresasController {
@@ -44,5 +44,15 @@ export class EmpresasController {
   @Delete(':id')
   remove(@Param('id') id: string): Promise<void> {
     return this.empresasService.remove(+id);
+  }
+
+  
+
+  @Get('tipo/:codPatronal')
+  @ApiOperation({ summary: 'Obtener el tipo de empresa por código patronal' })
+  @ApiResponse({ status: 200, description: 'Tipo de empresa retornado exitosamente.' })
+  @ApiResponse({ status: 404, description: 'Empresa no encontrada.' })
+  async findTipoByCodPatronal(@Param('codPatronal') codPatronal: string): Promise<string> {
+    return this.empresasService.findTipoByCodPatronal(codPatronal);
   }
 }

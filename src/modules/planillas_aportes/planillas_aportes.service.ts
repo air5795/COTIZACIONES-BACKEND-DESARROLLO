@@ -212,14 +212,7 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[]) {
   };
 }
 // 4 .- OBTENER HISTORIAL DETALLADO PAGINACION Y BUSQUEDA DE TABLA PLANILLAS DE APORTES -------------------------------------------------------------------------------------------------------
-async obtenerHistorial(
-  cod_patronal: string,
-  pagina: number = 1,
-  limite: number = 10,
-  busqueda: string = '',
-  mes?: string,
-  anio?: string
-) {
+async obtenerHistorial(cod_patronal: string,pagina: number = 1,limite: number = 10,busqueda: string = '', mes?: string, anio?: string) {
   try {
     // Validar parámetros
     if (pagina < 1 || limite < 1) {
@@ -369,8 +362,8 @@ async obtenerHistorialAdmin(
         'planilla.id_planilla_aportes',
         'planilla.com_nro',
         'planilla.fecha_planilla',
+        'planilla.tipo_planilla',
         'planilla.cod_patronal',
-        'planilla.tipo_empresa',
         'planilla.total_importe',
         'planilla.total_trabaj',
         'planilla.estado',
@@ -424,6 +417,7 @@ async obtenerHistorialAdmin(
       return {
         id_planilla_aportes: planilla.id_planilla_aportes,
         com_nro: planilla.com_nro,
+        tipo_planilla: planilla.tipo_planilla,
         fecha_planilla: planilla.fecha_planilla,
         cod_patronal: planilla.cod_patronal,
         empresa: rawData.empresa || null,
@@ -781,17 +775,33 @@ async actualizarEstadoAPendiente(id_planilla: number, fecha_declarada?: string) 
     throw new BadRequestException('La planilla debe estar en estado Borrador para ser presentada');
   }
 
+  // Actualizar el estado a Pendiente (1)
   planilla.estado = 1;
+
+  // Actualizar fecha_declarada
   planilla.fecha_declarada = fecha_declarada
     ? moment(fecha_declarada).tz('America/La_Paz').toDate()
     : moment().tz('America/La_Paz').toDate();
 
+  // Verificar si la empresa es de tipo 'AP' y actualizar fecha_pago
+  if (planilla.empresa?.tipo === 'AP' && planilla.fecha_planilla) {
+    const fechaPlanilla = new Date(planilla.fecha_planilla);
+    // Calcular el primer día del mes siguiente
+    const primerDiaMesSiguiente = new Date(
+      fechaPlanilla.getFullYear(),
+      fechaPlanilla.getMonth() + 1,
+      1
+    );
+    planilla.fecha_pago = primerDiaMesSiguiente;
+  }
+
+  // Guardar los cambios en la planilla
   await this.planillaRepo.save(planilla);
 
   // Obtener el nombre del mes
-  const nombreMes = meses[Number(planilla.mes) - 1]; // Convertimos planilla.mes a número
+  const nombreMes = meses[Number(planilla.mes) - 1];
 
-  // Generar notificacion
+  // Generar notificación
   const notificacionDto: CreateNotificacioneDto = {
     id_usuario_receptor: 'ADMINISTRADOR_COTIZACIONES', 
     tipo_notificacion: 'PLANILLA_PRESENTADA',
@@ -1632,21 +1642,12 @@ async calcularAportes(idPlanilla: number): Promise<PlanillasAporte> {
 
     // 16. Calcular Total Tasa de Interés
     planilla.total_tasa_interes = planilla.intereses;
+    
 
-    // 17. Calcular Total Aportes ASUSS
-    planilla.total_aportes_asuss = planilla.aporte_porcentaje * 0.005;
+    // 17. Calcular Total a Cancelar (incluye 5 Bs solo para tipo 'AV')
+    planilla.total_a_cancelar = planilla.total_a_cancelar_parcial + (planilla.empresa?.tipo === 'AV' ? 5 : 0);
 
-    // 18. Calcular Total Aportes Ministerio de Salud
-    planilla.total_aportes_min_salud = planilla.aporte_porcentaje * 0.05;
-
-    // 19. Calcular Total a Cancelar
-    planilla.total_a_cancelar =
-      planilla.total_a_cancelar_parcial +
-      5 - // Form DS-08
-      planilla.total_aportes_asuss -
-      planilla.total_aportes_min_salud;
-
-    // 20. Guardar los cambios
+    // 18. Guardar los cambios
     await this.planillaRepo.save(planilla);
 
     return planilla;
@@ -1778,18 +1779,8 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
     // 16. Calcular Total Tasa de Interés
     const totalTasaInteres = intereses;
 
-    // 17. Calcular Total Aportes ASUSS
-    const totalAportesAsuss = aportePorcentaje * 0.005;
-
-    // 18. Calcular Total Aportes Ministerio de Salud
-    const totalAportesMinSalud = aportePorcentaje * 0.05;
-
-    // 19. Calcular Total a Cancelar (sin duplicar multas e intereses)
-    const totalACancelar =
-      totalACancelarParcial +
-      5 - // Form DS-08
-      totalAportesAsuss -
-      totalAportesMinSalud;
+    // 17. Calcular Total a Cancelar (incluye 5 Bs solo para tipo 'AV')
+    const totalACancelar = totalACancelarParcial + (tipoEmpresa === 'AV' ? 5 : 0);
 
     // Devolver un objeto con todos los valores calculados
     return {
@@ -1808,8 +1799,6 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
       total_a_cancelar_parcial: totalACancelarParcial,
       total_multas: totalMultas,
       total_tasa_interes: totalTasaInteres,
-      total_aportes_asuss: totalAportesAsuss,
-      total_aportes_min_salud: totalAportesMinSalud,
       total_a_cancelar: totalACancelar,
     };
   } catch (error) {
