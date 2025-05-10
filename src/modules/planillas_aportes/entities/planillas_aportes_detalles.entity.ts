@@ -62,6 +62,9 @@ export class PlanillaAportesDetalles {
   @Column()
   regional: string;
 
+  @Column({ type: 'boolean', nullable: true })
+  es_afiliado: boolean | null;
+
   
 
 }

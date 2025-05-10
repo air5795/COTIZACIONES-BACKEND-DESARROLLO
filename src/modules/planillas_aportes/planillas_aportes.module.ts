@@ -9,6 +9,7 @@ import { Http } from 'winston/lib/winston/transports';
 import { HttpModule } from '@nestjs/axios';
 import { EmpresasModule } from '../empresas/empresas.module';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
+import { ApiClientModule } from '../api-client/api-client.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { NotificacionesModule } from '../notificaciones/notificaciones.module';
     EmpresasModule,
     HttpModule,
     NotificacionesModule,
+    ApiClientModule,
   ],
   controllers: [PlanillasAportesController],
   providers: [PlanillasAportesService],

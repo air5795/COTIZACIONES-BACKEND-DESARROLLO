@@ -4,6 +4,7 @@ import { Brackets, Not, Repository } from 'typeorm';
 import { PlanillasAporte } from './entities/planillas_aporte.entity';
 import { PlanillaAportesDetalles } from './entities/planillas_aportes_detalles.entity';
 import { HttpService } from '@nestjs/axios';
+import axios, { AxiosResponse } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import * as xlsx from 'xlsx';
 import * as fs from 'fs';
@@ -15,6 +16,7 @@ import { CreateNotificacioneDto } from '../notificaciones/dto/create-notificacio
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import { CreatePlanillasAporteDto } from './dto/create-planillas_aporte.dto';
 import { CreatePlanillaAportesDetallesDto } from './dto/create-planillas_aportes_detalles.dto';
+import { ExternalApiService } from '../api-client/service/external-api.service';
 
 @Injectable()
 export class PlanillasAportesService {
@@ -28,6 +30,7 @@ export class PlanillasAportesService {
     private detalleRepo: Repository<PlanillaAportesDetalles>,
 
     private readonly empresasService: EmpresasService,
+    private readonly externalApiService: ExternalApiService,
   ) {}
 
 // 1 .-  PROCESAR EXCEL DE APORTES-------------------------------------------------------------------------------------------------------
@@ -672,7 +675,8 @@ async obtenerDetalles(id_planilla: number, pagina: number = 1, limite: number = 
         'detalle.dias_pagados',
         'detalle.salario',
         'detalle.regional',
-        'detalle.haber_basico'
+        'detalle.haber_basico',
+        'detalle.es_afiliado'
       ]);
 
     if (limite > 0) { // Solo aplicar paginación si limite es positivo
@@ -2109,6 +2113,67 @@ async generarReporteHistorial(mes?: number, gestion?: number): Promise<Streamabl
     });
   } catch (error) {
     throw new BadRequestException(`Error al generar el reporte de historial: ${error.message}`);
+  }
+}
+
+// 28 .- METODO CRUCE CON AFILIACIONES
+async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string; detallesActualizados: number }> {
+  try {
+    // Validar parámetro
+    if (!idPlanilla || idPlanilla < 1) {
+      throw new BadRequestException('El ID de la planilla debe ser un número positivo');
+    }
+
+    // Obtener todos los detalles de la planilla
+    const detalles = await this.detalleRepo.find({
+      where: { id_planilla_aportes: idPlanilla },
+    });
+
+    if (!detalles || detalles.length === 0) {
+      throw new BadRequestException('No se encontraron detalles para la planilla especificada');
+    }
+
+    let detallesActualizados = 0;
+
+    // Asegurarse de que el token esté disponible
+    if (!this.externalApiService.getApiToken()) {
+      await this.externalApiService.loginToExternalApi();
+    }
+
+    // Iterar sobre cada detalle
+    for (const detalle of detalles) {
+      try {
+        // Consultar el servicio externo con el CI
+        const response = await this.externalApiService.getAseguradoByCi(detalle.ci);
+
+        // Verificar si la respuesta contiene datos válidos
+        if (response.status && response.data) {
+          const estadoAsegurado = response.data.ASE_ESTADO;
+          // Actualizar es_afiliado: true si es 'VIGENTE', false en cualquier otro caso
+          detalle.es_afiliado = estadoAsegurado === 'VIGENTE';
+        } else {
+          // Si no se encuentra el asegurado, marcar como no afiliado
+          detalle.es_afiliado = false;
+        }
+
+        // Guardar el detalle actualizado
+        await this.detalleRepo.save(detalle);
+        detallesActualizados++;
+      } catch (error) {
+        // En caso de error en la consulta (por ejemplo, servicio no disponible), marcar como no afiliado
+        console.error(`Error al consultar CI ${detalle.ci}: ${error.message}`);
+        detalle.es_afiliado = false;
+        await this.detalleRepo.save(detalle);
+        detallesActualizados++;
+      }
+    }
+
+    return {
+      mensaje: `Verificación completada. Se actualizaron ${detallesActualizados} detalles.`,
+      detallesActualizados,
+    };
+  } catch (error) {
+    throw new BadRequestException(`Error al verificar afiliación: ${error.message}`);
   }
 }
 

@@ -7,6 +7,7 @@ import { UpdateEmpresaDto } from './dto/update-empresa.dto';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ExternalApiService } from '../../modules/api-client/service/external-api.service';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class EmpresasService {
@@ -15,6 +16,7 @@ export class EmpresasService {
     private readonly empresaRepository: Repository<Empresa>,
     private readonly externalApiService: ExternalApiService,
     private readonly httpService: HttpService,
+    private readonly configService: ConfigService,
   ) {}
 
   // Sincronizar empresas desde el Servicio 2
@@ -121,5 +123,47 @@ export class EmpresasService {
       throw new HttpException('Empresa no encontrada', HttpStatus.NOT_FOUND);
     }
     return empresa.tipo || 'No especificado';
+  }
+
+  // metodo para obtener la cadena de direrecion de la empresa para GOOGLE MAPS
+  async obtenerDireccionCompleta(id: number): Promise<string> {
+    const empresa = await this.findOne(id); // Usa tu método existente
+  
+    const partesDireccion = [
+      empresa.emp_calle,
+      empresa.emp_num,
+      empresa.emp_zona ? `ZONA ${empresa.emp_zona}` : null,
+      empresa.emp_localidad,
+    ].filter(Boolean); // Elimina null o undefined
+  
+    return partesDireccion.join(', ');
+  }
+
+  // Método para obtener coordenadas de Google Maps
+  async obtenerCoordenadas(id: number): Promise<{ lat: number; lng: number }> {
+    const direccion = await this.obtenerDireccionCompleta(id);
+    const apiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
+  
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+      direccion,
+    )}&key=${apiKey}`;
+  
+    const response = await this.httpService.axiosRef.get(url);
+  
+    if (
+      response.data.status === 'OK' &&
+      response.data.results &&
+      response.data.results.length > 0
+    ) {
+      const location = response.data.results[0].geometry.location;
+      return { lat: location.lat, lng: location.lng };
+    }
+  
+    throw new HttpException(
+      'No se pudo obtener la ubicación desde Google Maps',
+      HttpStatus.BAD_REQUEST,
+    );
+  
+
   }
 }

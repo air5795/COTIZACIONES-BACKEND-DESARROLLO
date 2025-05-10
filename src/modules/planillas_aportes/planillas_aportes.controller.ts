@@ -729,7 +729,26 @@ async generarReporteHistorial(
   }
 }
 
-// 28 .- DESCARGAR PLANTILLA DE APORTES EN EXCEL -----------------------------------------------------
+// 28 .- CRUCE AFLILIADOS -----------------------------------------------------
+@Post('verificar-afiliacion/:id_planilla')
+  @ApiOperation({ 
+    summary: 'Verificar afiliación de asegurados en los detalles de una planilla', 
+    description: 'Consulta el estado de afiliación de cada asegurado en los detalles de una planilla y actualiza el campo es_afiliado.' 
+  })
+  @ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
+  @ApiResponse({ status: 200, description: 'Verificación completada con éxito' })
+  @ApiResponse({ status: 400, description: 'Error al verificar afiliación' })
+  async verificarAfiliacionDetalles(@Param('id_planilla', ParseIntPipe) id_planilla: number) {
+    try {
+      return await this.planillasAportesService.verificarAfiliacionDetalles(id_planilla);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+
+
+// 00 .- DESCARGAR PLANTILLA DE APORTES EN EXCEL -----------------------------------------------------
 
   @Get('descargar-plantilla')
   @ApiOperation({ summary: 'Descargar la plantilla Excel' })
