@@ -65,6 +65,12 @@ export class PlanillaAportesDetalles {
   @Column({ type: 'boolean', nullable: true })
   es_afiliado: boolean | null;
 
+  @Column()
+  matricula: string;
+
+  @Column()
+  tipo_afiliado: string;
+
   
 
 }

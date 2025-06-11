@@ -16,6 +16,25 @@ export class PlanillasAportesController {
     private readonly planillasAportesService: PlanillasAportesService,
   ) {}
 
+  // (estaticas ) DESCARGAR PLANTILLA DE APORTES EN EXCEL -----------------------------------------------------
+
+  @Get('descargar-plantilla')
+  @ApiOperation({ summary: 'Descargar la plantilla Excel para aportes' })
+  @ApiResponse({ status: 200, description: 'Plantilla descargada con éxito', type: StreamableFile })
+  @ApiResponse({ status: 400, description: 'Error al descargar la plantilla' })
+  async descargarPlantilla(@Res({ passthrough: true }) res): Promise<StreamableFile> {
+    try {
+      const file = await this.planillasAportesService.descargarPlantilla();
+      res.set({
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="plantilla.xlsx"',
+      });
+      return file;
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   // 1.-  Endpoint para subir un archivo Excel con la planilla de aportes ----------------------------------------------
   @Post('subir')
   @UseInterceptors(
@@ -746,32 +765,94 @@ async generarReporteHistorial(
     }
   }
 
+  // 29 .- 
 
-
-// 00 .- DESCARGAR PLANTILLA DE APORTES EN EXCEL -----------------------------------------------------
-
-  @Get('descargar-plantilla')
-  @ApiOperation({ summary: 'Descargar la plantilla Excel' })
-  @ApiResponse({ status: 200, description: 'Archivo descargado con éxito' })
-  @ApiResponse({ status: 404, description: 'Archivo no encontrado' })
-  async descargarPlantilla(@Res() res: Response) {
-   /*  const filePath = path.join(__dirname, '..', 'PLANTILLA.xlsx'); */
-    const filePath = path.resolve('src/modules/planillas_aportes/templates/plantilla.xlsx',);
-    console.log('Ruta del archivo:', filePath); 
-
-    if (!fs.existsSync(filePath)) {
-      throw new HttpException('Archivo PLANTILLA no encontrado', HttpStatus.NOT_FOUND);
+  @Put('validar-liquidacion/:id_planilla')
+  @ApiOperation({ summary: 'Validar liquidación y actualizar fecha de pago y liquidación' })
+  @ApiParam({ name: 'id_planilla', type: Number, description: 'ID de la planilla' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        fecha_pago: { 
+          type: 'string', 
+          format: 'date-time', 
+          example: '2025-05-19T00:00:00.000Z',
+          description: 'Fecha de pago (opcional)',
+          nullable: true,
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Liquidación validada con éxito' })
+  @ApiResponse({ status: 400, description: 'Error en la solicitud' })
+  @ApiResponse({ status: 404, description: 'Planilla no encontrada' })
+  async validarLiquidacion(
+    @Param('id_planilla') id_planilla: number,
+    @Body() body: { fecha_pago?: string },
+  ) {
+    try {
+      return await this.planillasAportesService.validarLiquidacion(id_planilla, body);
+    } catch (error) {
+      throw new HttpException(
+        {
+          status: HttpStatus.BAD_REQUEST,
+          error: error.message,
+        },
+        error.status || HttpStatus.BAD_REQUEST,
+      );
     }
-
-    res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': 'attachment; filename="PLANTILLA.xlsx"',
-    });
-
-    // Crear un stream del archivo y enviarlo
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
   }
+
+
+// 30 .- REPORTE AFILIACIONES VIGENTE NO VIGENTES 
+
+@Get('reporte-afiliacion/:id_planilla')
+@ApiOperation({ summary: 'Generar reporte PDF de afiliación por planilla' })
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
+@ApiResponse({ status: 200, description: 'Reporte PDF generado exitosamente', type: StreamableFile })
+@ApiResponse({ status: 400, description: 'Error al generar el reporte' })
+async generarReporteAfiliacion(
+  @Param('id_planilla', ParseIntPipe) id_planilla: number,
+): Promise<StreamableFile> {
+  try {
+    const fileBuffer = await this.planillasAportesService.generarReporteAfiliacion(id_planilla);
+    if (!fileBuffer) {
+      throw new BadRequestException('No se pudo generar el reporte de afiliación.');
+    }
+    return fileBuffer;
+  } catch (error) {
+    throw new BadRequestException({
+      message: 'Error al generar el reporte de afiliación',
+      details: error.message,
+    });
+  }
+}
+
+// 31.- REPORTE DE DETALLES DE PLANILLA EN EXCEL 
+
+@Get('reporte-detalles-excel/:id_planilla')
+@ApiOperation({ summary: 'Generar reporte Excel de detalles de una planilla' })
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
+@ApiResponse({ status: 200, description: 'Reporte Excel generado exitosamente', type: StreamableFile })
+@ApiResponse({ status: 400, description: 'Error al generar el reporte' })
+async generarReporteDetallesExcel(
+  @Param('id_planilla', ParseIntPipe) id_planilla: number,
+): Promise<StreamableFile> {
+  try {
+    const fileBuffer = await this.planillasAportesService.generarReporteDetallesExcel(id_planilla);
+    if (!fileBuffer) {
+      throw new BadRequestException('No se pudo generar el reporte de detalles.');
+    }
+    return fileBuffer;
+  } catch (error) {
+    throw new BadRequestException({
+      message: 'Error al generar el reporte de detalles',
+      details: error.message,
+    });
+  }
+}
+
 
 
 

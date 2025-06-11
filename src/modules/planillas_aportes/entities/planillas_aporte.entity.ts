@@ -3,7 +3,6 @@ import { PlanillaAportesDetalles } from './planillas_aportes_detalles.entity';
 import { PagoAporte } from 'src/modules/pagos-aportes/entities/pagos-aporte.entity';
 import { Empresa } from 'src/modules/empresas/entities/empresa.entity';
 
-
 @Entity({ schema: 'transversales', name: 'planillas_aportes' })
 export class PlanillasAporte {
   @PrimaryGeneratedColumn()
@@ -51,6 +50,9 @@ export class PlanillasAporte {
   @Column({ nullable: true })
   fecha_pago: Date;
 
+  @Column({ nullable: true })
+  fecha_liquidacion: Date;
+
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   aporte_porcentaje: number;
 
@@ -97,7 +99,26 @@ export class PlanillasAporte {
   total_aportes_min_salud: number;
 
   @Column({ nullable: true })
-  id_empresa: number; 
+  id_empresa: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  total_deducciones: number;
+
+  @Column({ default: false })
+  aplica_descuento_min_salud: boolean;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  otros_descuentos: number;
+
+  @Column({ type: 'text', nullable: true })
+  motivo_otros_descuentos: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  excedente: number;
+
+  @Column({ type: 'text', nullable: true })
+  motivo_excedente: string;
+
 
   @OneToMany(() => PagoAporte, (pago) => pago.planilla)
   pagos: PagoAporte[];
@@ -105,6 +126,4 @@ export class PlanillasAporte {
   @ManyToOne(() => Empresa, (empresa) => empresa.planillasAportes, { nullable: true })
   @JoinColumn({ name: 'id_empresa' })
   empresa: Empresa;
-
-
 }

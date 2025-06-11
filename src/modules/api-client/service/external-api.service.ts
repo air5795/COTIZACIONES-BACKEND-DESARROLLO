@@ -1,41 +1,52 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable } from '@nestjs/common';
+import { url } from 'inspector';
 import { firstValueFrom } from 'rxjs';
 import { ResponseUtil } from 'src/core/utility/response-util';
 
 @Injectable()
 export class ExternalApiService {
-  private baseUrl = process.env.EXTERNAL_API_URL;
+  private baseUrl = 'http://192.168.1.224:8888/saas-siigah/api/v1';
   private userName = process.env.API_USERNAME;
   private password = process.env.API_PASSWORD;
   private apiToken: string | null = null;
 
-  constructor(private readonly httpService: HttpService) {}
+  constructor(private readonly httpService: HttpService) {
+    console.log('EXTERNAL_API_URL:', this.baseUrl);
+  console.log('API_USERNAME:', this.userName);
+  console.log('API_PASSWORD:', this.password);
+  }
 
   async loginToExternalApi() {
-    const data = new URLSearchParams();
-    data.append('user', this.userName);
-    data.append('password', this.password);
+    const params = new URLSearchParams();
+    params.append('user', this.userName);
+    params.append('password', this.password);
 
     try {
-        const response = await firstValueFrom(
-            this.httpService.post(
-                `${this.baseUrl}/security/login`,
-                data.toString(),
-                {
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                },
-            ),
-        );
+      console.log('Iniciando sesión en API externa con:', {
+        user: this.userName,
+        password: this.password,
+        url: `${this.baseUrl}/security/login`,
+      });
+      const response = await firstValueFrom(
+        this.httpService.post(`${this.baseUrl}/security/login`, params, {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        }),
+      );
 
-        this.apiToken = response.data.token;
+      this.apiToken = response.data.token;
 
+      return {
+        status: true,
+        data: response.data,
+        message: 'Inicio de sesión exitoso',
+      };
     } catch (error) {
-        return {
-            status: false,
-            data: null,
-            message: `Error al iniciar sesión en la API externa`,
-        };
+      console.error('Error al iniciar sesión en API externa:', error.response?.data || error.message);
+      this.apiToken = null; // Resetear el token en caso de fallo
+      throw new Error(`Error al iniciar sesión en la API externa: ${error.message}`);
     }
 }
 

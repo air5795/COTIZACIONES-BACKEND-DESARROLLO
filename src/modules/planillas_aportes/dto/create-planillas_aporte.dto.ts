@@ -52,6 +52,10 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   fecha_pago?: string;
 
+  @IsDateString()
+  @IsOptional()
+  fecha_liquidacion?: string;
+
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsOptional()
   aporte_porcentaje?: number;
@@ -115,4 +119,28 @@ export class CreatePlanillasAporteDto {
   @IsInt()
   @IsOptional()
   id_empresa?: number;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsOptional()
+  total_deducciones?: number;
+
+  @IsOptional()
+  aplica_descuento_min_salud?: boolean;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsOptional()
+  otros_descuentos?: number;
+
+  @IsString()
+  @IsOptional()
+  motivo_otros_descuentos?: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsOptional()
+  excedente?: number;
+
+  @IsString()
+  @IsOptional()
+  motivo_excedente?: string;
+
 }

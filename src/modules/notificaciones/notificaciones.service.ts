@@ -50,8 +50,6 @@ export class NotificacionesService {
     }
   }
 
-
-
   async marcarComoLeida(id_notificacion: number, dto: UpdateNotificacioneDto): Promise<void> {
     try {
       await this.notificacionesRepo.update(id_notificacion, dto);

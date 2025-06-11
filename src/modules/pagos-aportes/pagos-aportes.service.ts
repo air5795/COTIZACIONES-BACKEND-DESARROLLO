@@ -44,6 +44,20 @@ export class PagosAportesService {
         await this.planillasAportesService.actualizarFechaPago(idPlanilla, fechaPago);
         // Recalcular los aportes con la fecha_pago real
         await this.planillasAportesService.calcularAportes(idPlanilla);
+
+        // Verificar si hubo excedente
+        const planillaActualizada = await this.planillasAportesService.getPlanillaCompleta(idPlanilla);
+
+        const montoPagado = Number(pagoData.monto_pagado || 0);
+        const totalCancelar = Number(planillaActualizada.total_a_cancelar || 0);
+
+        if (montoPagado > totalCancelar) {
+          const excedente = montoPagado - totalCancelar;
+          const motivo = 'Pago superior al total calculado en liquidación';
+
+          await this.planillasAportesService.actualizarExcedente(idPlanilla, excedente, motivo);
+        }
+
       } else {
         throw new BadRequestException('El id_planilla_aportes es requerido.');
       }
