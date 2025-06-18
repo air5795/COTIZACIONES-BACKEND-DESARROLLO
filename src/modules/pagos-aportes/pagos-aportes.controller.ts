@@ -1,7 +1,7 @@
 import { Controller, Post, Body, UploadedFile, UseInterceptors, BadRequestException, Get, Param, HttpException, HttpStatus, StreamableFile } from '@nestjs/common';
 import { PagosAportesService } from './pagos-aportes.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('Pagos-aportes')
 @Controller('pagos-aportes')
@@ -42,7 +42,6 @@ export class PagosAportesController {
   }
 
   //5.-
-
   @Get('reporte-pago/:id_planilla')
   @ApiOperation({ summary: 'Generar reporte PDF de un pago específico' })
   @ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })

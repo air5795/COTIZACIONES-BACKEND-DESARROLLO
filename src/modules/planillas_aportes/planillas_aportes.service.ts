@@ -45,7 +45,7 @@ async descargarPlantilla(): Promise<StreamableFile> {
   return new StreamableFile(fileStream);
 }
 
-// 1 .-  PROCESAR EXCEL DE APORTES-------------------------------------------------------------------------------------------------------
+// 1 .-  PROCESAR EXCEL DE APORTES -------------------------------------------------------------------------------------------------------
 procesarExcel(filePath: string) {
   try {
     const workbook = xlsx.readFile(filePath);
@@ -63,7 +63,7 @@ procesarExcel(filePath: string) {
 }
 // 2 .- GUARDAR PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
 async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) {
-  const { cod_patronal, gestion, mes, tipo_planilla } = createPlanillaDto;
+  const { cod_patronal, gestion, mes, tipo_planilla , usuario_creacion, nombre_creacion } = createPlanillaDto;
 
   const empresa = await this.empresasService.findByCodPatronal(cod_patronal);
   if (!empresa) {
@@ -109,6 +109,8 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     fecha_declarada: null,
     mes,
     gestion,
+    usuario_creacion: usuario_creacion ,
+    nombre_creacion: nombre_creacion,
   });
 
   const planillaGuardada = await this.planillaRepo.save(nuevaPlanilla);
@@ -185,23 +187,70 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
   };
 }
 // 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
-async actualizarDetallesPlanilla(id_planilla: number, data: any[]) {
-  const planilla = await this.planillaRepo.findOne({ where: { id_planilla_aportes: id_planilla } });
+async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanillaDto?: CreatePlanillasAporteDto) {
+  // Buscar la planilla existente
+  const planilla = await this.planillaRepo.findOne({
+    where: { id_planilla_aportes: id_planilla },
+    relations: ['empresa'],
+  });
 
   if (!planilla) {
-    throw new BadRequestException('❌ La planilla no existe.');
+    throw new NotFoundException('❌ La planilla no existe.');
   }
 
-  const datosValidos = data.filter(row => 
-    row['Número documento de identidad'] && row['Nombres'] && row['Haber Básico']
+  // Validar que la planilla esté en estado borrador (estado = 0)
+  if (planilla.estado !== 0) {
+    throw new BadRequestException('❌ Solo se pueden actualizar planillas en estado borrador.');
+  }
+
+  // Validar que los datos no estén vacíos
+  const datosValidos = data.filter(row =>
+    row['Número documento de identidad'] &&
+    row['Nombres'] &&
+    row['Haber Básico']
   );
 
   if (datosValidos.length === 0) {
     throw new BadRequestException('❌ No se encontraron registros válidos en el archivo.');
   }
 
-  await this.detalleRepo.delete({ id_planilla_aportes: id_planilla });
+  // Si se proporciona un DTO, actualizar campos relevantes de la planilla
+  if (createPlanillaDto) {
+    const { cod_patronal, gestion, mes, tipo_planilla } = createPlanillaDto;
 
+    // Validar empresa
+    const empresa = await this.empresasService.findByCodPatronal(cod_patronal);
+    if (!empresa) {
+      throw new BadRequestException('No se encontró una empresa con el código patronal proporcionado');
+    }
+
+    // Validar si ya existe una planilla mensual para el mismo mes y gestión
+    if (tipo_planilla === 'Mensual') {
+      const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
+      const existePlanillaMensual = await this.planillaRepo.findOne({
+        where: {
+          cod_patronal,
+          fecha_planilla: fechaPlanilla,
+          tipo_planilla: 'Mensual',
+          id_planilla_aportes: Not(id_planilla),
+        },
+      });
+
+      if (existePlanillaMensual) {
+        throw new BadRequestException('Ya existe una planilla Mensual para este mes y gestión.');
+      }
+
+      // Actualizar campos de la planilla
+      planilla.cod_patronal = cod_patronal;
+      planilla.id_empresa = empresa.id_empresa;
+      planilla.fecha_planilla = fechaPlanilla;
+      planilla.mes = mes;
+      planilla.gestion = gestion;
+      planilla.tipo_planilla = tipo_planilla;
+    }
+  }
+
+  // Calcular total_importe y total_trabaj
   const totalImporte = datosValidos.reduce((sum, row) => {
     const sumaFila =
       parseFloat(row['Haber Básico'] || '0') +
@@ -214,43 +263,82 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[]) {
 
   const totalTrabaj = datosValidos.length;
 
-  const nuevosDetalles = datosValidos.map((row) => ({
-    id_planilla_aportes: id_planilla,
-    nro: row['Nro.'] || 0,
-    ci: row['Número documento de identidad'] || '',
-    apellido_paterno: row['Apellido Paterno'] || '',
-    apellido_materno: row['Apellido Materno'] || '',
-    nombres: row['Nombres'] || '',
-    sexo: row['Sexo (M/F)'] || '',
-    cargo: row['Cargo'] || '',
-    fecha_nac: row['Fecha de nacimiento'] ? new Date(1900, 0, row['Fecha de nacimiento'] - 1) : new Date('1900-01-01'),
-    fecha_ingreso: row['Fecha de ingreso'] ? new Date(1900, 0, row['Fecha de ingreso'] - 1) : new Date(),
-    fecha_retiro: row['Fecha de retiro'] ? new Date(1900, 0, row['Fecha de retiro'] - 1) : null,
-    dias_pagados: row['Días pagados'] || 0,
-    haber_basico: parseFloat(row['Haber Básico'] || '0'),
-    bono_antiguedad: parseFloat(row['Bono de antigüedad'] || '0'),
-    monto_horas_extra: parseFloat(row['Monto horas extra'] || '0'),
-    monto_horas_extra_nocturnas: parseFloat(row['Monto horas extra nocturnas'] || '0'),
-    otros_bonos_pagos: parseFloat(row['Otros bonos y pagos'] || '0'),
-    salario: (
-      parseFloat(row['Haber Básico'] || '0') +
-      parseFloat(row['Bono de antigüedad'] || '0') +
-      parseFloat(row['Monto horas extra'] || '0') +
-      parseFloat(row['Monto horas extra nocturnas'] || '0') +
-      parseFloat(row['Otros bonos y pagos'] || '0')
-    ) || 0,
-    regional: row['regional'] || '',
-  }));
+  // Función auxiliar para convertir y validar fechas de Excel (reutilizada de guardarPlanilla)
+  function parseExcelDate(value: any): string | undefined {
+    if (!value) return undefined;
 
+    if (typeof value === 'number' && !isNaN(value) && value > 0) {
+      try {
+        const date = new Date(1900, 0, value - 1);
+        if (isNaN(date.getTime())) {
+          throw new Error('Fecha inválida');
+        }
+        return date.toISOString();
+      } catch {
+        throw new BadRequestException(`Fecha inválida en el Excel: ${value}`);
+      }
+    }
+
+    if (typeof value === 'string') {
+      const parsedDate = moment(value, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY'], true);
+      if (parsedDate.isValid()) {
+        return parsedDate.toISOString();
+      }
+      throw new BadRequestException(`Formato de fecha no válido: ${value}`);
+    }
+
+    return undefined;
+  }
+
+  // Mapear los datos a CreatePlanillaAportesDetallesDto
+  const nuevosDetalles: CreatePlanillaAportesDetallesDto[] = datosValidos.map((row) => {
+    try {
+      return {
+        id_planilla_aportes: id_planilla,
+        nro: row['Nro.'] || 0,
+        ci: row['Número documento de identidad'] || '',
+        apellido_paterno: row['Apellido Paterno'] || '',
+        apellido_materno: row['Apellido Materno'] || '',
+        nombres: row['Nombres'] || '',
+        sexo: row['Sexo (M/F)'] || '',
+        cargo: row['Cargo'] || '',
+        fecha_nac: parseExcelDate(row['Fecha de nacimiento']),
+        fecha_ingreso: parseExcelDate(row['Fecha de ingreso']),
+        fecha_retiro: parseExcelDate(row['Fecha de retiro']),
+        dias_pagados: row['Días pagados'] || 0,
+        haber_basico: parseFloat(row['Haber Básico'] || '0'),
+        bono_antiguedad: parseFloat(row['Bono de antigüedad'] || '0'),
+        monto_horas_extra: parseFloat(row['Monto horas extra'] || '0'),
+        monto_horas_extra_nocturnas: parseFloat(row['Monto horas extra nocturnas'] || '0'),
+        otros_bonos_pagos: parseFloat(row['Otros bonos y pagos'] || '0'),
+        salario: (
+          parseFloat(row['Haber Básico'] || '0') +
+          parseFloat(row['Bono de antigüedad'] || '0') +
+          parseFloat(row['Monto horas extra'] || '0') +
+          parseFloat(row['Monto horas extra nocturnas'] || '0') +
+          parseFloat(row['Otros bonos y pagos'] || '0')
+        ) || 0,
+        regional: row['regional'] || '',
+      };
+    } catch (error) {
+      throw new BadRequestException(`Error en la fila ${row['Nro.']}: ${error.message}`);
+    }
+  });
+
+  // Eliminar los detalles anteriores
+  await this.detalleRepo.delete({ id_planilla_aportes: id_planilla });
+
+  // Guardar los nuevos detalles
   await this.detalleRepo.save(nuevosDetalles);
 
+  // Actualizar la planilla
   planilla.total_importe = totalImporte;
   planilla.total_trabaj = totalTrabaj;
-
   await this.planillaRepo.save(planilla);
 
-  return { 
+  return {
     mensaje: '✅ Detalles de la planilla actualizados con éxito',
+    id_planilla: planilla.id_planilla_aportes,
     total_importe: totalImporte,
     total_trabajadores: totalTrabaj,
   };
@@ -695,7 +783,7 @@ async obtenerPlanilla(id_planilla: number) {
     throw new BadRequestException(`Error al obtener la planilla: ${error.message}`);
   }
 }
-// 7.1 .- (EXDENTES )OBTENER PLANILLA PARA REGISTRAR EXDENTES DE LA LIQUIDACION NO CONTIENE CONTROLADOR-------------------------------------------------------------------------------------------------------
+// 7.1 .- (EXEDENTES )OBTENER PLANILLA PARA REGISTRAR EXEDENTES DE LA LIQUIDACION NO CONTIENE CONTROLADOR-------------------------------------------------------------------------------------------------------
 async getPlanillaCompleta(id: number): Promise<PlanillasAporte> {
   const planilla = await this.planillaRepo.findOne({
     where: { id_planilla_aportes: id },

@@ -50,7 +50,16 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('CBES - Caja Bancaria Estatal de Salud')
     .setDescription('DOCUMENTACION DEL SISTEMA DE COTIZACIONES - DESARROLLO')
-    .setVersion('1.0')
+/*     .setVersion('1.0')
+        .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Ingresa el token JWT (ejemplo: "Bearer <token>")',
+      },
+      'JWT-auth',
+    ) */
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/v1/docs', app, document, {

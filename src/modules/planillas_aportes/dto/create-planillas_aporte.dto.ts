@@ -32,6 +32,10 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   usuario_creacion?: string;
 
+  @IsString()
+  @IsOptional()
+  nombre_creacion?: string;
+
   @IsDateString()
   @IsOptional()
   fecha_creacion?: string;

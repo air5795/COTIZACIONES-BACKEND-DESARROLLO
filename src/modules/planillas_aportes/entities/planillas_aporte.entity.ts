@@ -35,6 +35,9 @@ export class PlanillasAporte {
   @Column({ default: () => 'CURRENT_USER' })
   usuario_creacion: string;
 
+  @Column()
+  nombre_creacion: string;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   fecha_creacion: Date;
 
@@ -118,7 +121,6 @@ export class PlanillasAporte {
 
   @Column({ type: 'text', nullable: true })
   motivo_excedente: string;
-
 
   @OneToMany(() => PagoAporte, (pago) => pago.planilla)
   pagos: PagoAporte[];

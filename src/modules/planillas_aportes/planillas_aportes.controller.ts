@@ -81,14 +81,16 @@ export class PlanillasAportesController {
   @ApiOperation({ summary: 'Actualizar los detalles de una planilla de aportes' })
   @ApiResponse({ status: 200, description: 'Detalles actualizados con éxito' })
   @ApiResponse({ status: 400, description: 'Error al actualizar los detalles' })
+  @ApiBody({ type: CreatePlanillasAporteDto, required: false })
   async actualizarDetallesPlanilla(
-    @Param('id_planilla') id_planilla: number,
-    @Body() body,
+    @Param('id_planilla', ParseIntPipe) id_planilla: number,
+    @Body() body: { trabajadores: any[]; planilla?: CreatePlanillasAporteDto },
   ) {
     try {
       return await this.planillasAportesService.actualizarDetallesPlanilla(
         id_planilla,
         body.trabajadores,
+        body.planilla,
       );
     } catch (error) {
       throw new HttpException(
