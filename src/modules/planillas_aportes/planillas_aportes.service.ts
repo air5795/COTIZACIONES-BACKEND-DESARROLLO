@@ -63,15 +63,27 @@ procesarExcel(filePath: string) {
 }
 // 2 .- GUARDAR PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
 async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) {
-  const { cod_patronal, gestion, mes, tipo_planilla , usuario_creacion, nombre_creacion } = createPlanillaDto;
+  const { cod_patronal, gestion, mes, tipo_planilla, usuario_creacion, nombre_creacion } = createPlanillaDto;
 
+  // Buscar empresa por código patronal
   const empresa = await this.empresasService.findByCodPatronal(cod_patronal);
   if (!empresa) {
     throw new BadRequestException('No se encontró una empresa con el código patronal proporcionado');
   }
 
+  // Validar tipo de empresa
+  const tipoEmpresa = empresa.tipo?.toUpperCase();
+  if (!tipoEmpresa) {
+    throw new BadRequestException('No se pudo determinar el tipo de empresa');
+  }
+  if (!['PA', 'AP', 'AV', 'VA'].includes(tipoEmpresa)) {
+    throw new BadRequestException(`Tipo de empresa no válido: ${tipoEmpresa}`);
+  }
+
+  // Crear fecha de la planilla
   const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
 
+  // Validar existencia de planilla mensual
   if (tipo_planilla === 'Mensual') {
     const existePlanillaMensual = await this.planillaRepo.findOne({
       where: {
@@ -86,6 +98,7 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     }
   }
 
+  // Calcular totalImporte
   const totalImporte = data.reduce((sum, row) => {
     const sumaFila =
       parseFloat(row['Haber Básico'] || '0') +
@@ -96,8 +109,20 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     return sum + sumaFila;
   }, 0);
 
+  // Calcular cotizacion_tasa según el tipo de empresa
+  let cotizacionTasa: number;
+  if (tipoEmpresa === 'PA') {
+    cotizacionTasa = parseFloat((totalImporte * 0.03).toFixed(2)); // 3%
+  } else if (['AP', 'AV', 'VA'].includes(tipoEmpresa)) {
+    cotizacionTasa = parseFloat((totalImporte * 0.1).toFixed(2)); // 10%
+  } else {
+    throw new BadRequestException(`Tipo de empresa no válido para cálculo de cotización: ${tipoEmpresa}`);
+  }
+
+  // Total de trabajadores
   const totalTrabaj = data.length;
 
+  // Crear nueva planilla con cotizacion_tasa
   const nuevaPlanilla = this.planillaRepo.create({
     cod_patronal,
     id_empresa: empresa.id_empresa,
@@ -109,17 +134,18 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     fecha_declarada: null,
     mes,
     gestion,
-    usuario_creacion: usuario_creacion ,
-    nombre_creacion: nombre_creacion,
+    usuario_creacion,
+    nombre_creacion,
+    cotizacion_tasa: cotizacionTasa,
   });
 
+  // Guardar la planilla
   const planillaGuardada = await this.planillaRepo.save(nuevaPlanilla);
 
-    // Función auxiliar para convertir y validar fechas de Excel
+  // Función auxiliar para convertir y validar fechas de Excel
   function parseExcelDate(value: any): string | undefined {
     if (!value) return undefined;
 
-    // Si es un número (serial de Excel)
     if (typeof value === 'number' && !isNaN(value) && value > 0) {
       try {
         const date = new Date(1900, 0, value - 1);
@@ -132,9 +158,8 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
       }
     }
 
-    // Si es una cadena (formato de fecha como DD/MM/YYYY)
     if (typeof value === 'string') {
-      const parsedDate = moment(value, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY' , ''], true);
+      const parsedDate = moment(value, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY'], true);
       if (parsedDate.isValid()) {
         return parsedDate.toISOString();
       }
@@ -143,7 +168,6 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
 
     return undefined;
   }
-  
 
   const detalles: CreatePlanillaAportesDetallesDto[] = data.map((row) => {
     try {
@@ -179,14 +203,16 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     }
   });
 
+  // Guardar detalles
   await this.detalleRepo.save(detalles);
 
   return {
     mensaje: '✅ Planilla guardada con éxito',
     id_planilla: planillaGuardada.id_planilla_aportes,
   };
-}
-// 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
+} 
+
+  // 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
 async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanillaDto?: CreatePlanillasAporteDto) {
   // Buscar la planilla existente
   const planilla = await this.planillaRepo.findOne({
@@ -776,6 +802,8 @@ async obtenerPlanilla(id_planilla: number) {
       total_tasa_interes: planilla.total_tasa_interes,
       total_aportes_asuss: planilla.total_aportes_asuss,
       total_aportes_min_salud: planilla.total_aportes_min_salud,
+      nombre_creacion: planilla.nombre_creacion,
+      cotizacion_tasa: planilla.cotizacion_tasa,
     };
 
     return { mensaje: 'Planilla obtenida con éxito', planilla: mappedPlanilla };
@@ -1714,12 +1742,10 @@ async getUfvForDate(fecha: Date): Promise<number> {
 // 23 .- Función para calcular los aportes  -------------------------------------------------------------------------------------------------------
 async calcularAportes(idPlanilla: number): Promise<any> {
   try {
-    // Validar parámetro
     if (!idPlanilla || idPlanilla < 1) {
       throw new BadRequestException('El ID de la planilla debe ser un número positivo');
     }
 
-    // 1. Obtener la planilla con la relación empresa
     const planilla = await this.planillaRepo.findOne({
       where: { id_planilla_aportes: idPlanilla },
       relations: ['empresa'],
@@ -1729,15 +1755,10 @@ async calcularAportes(idPlanilla: number): Promise<any> {
       throw new BadRequestException('Planilla no encontrada');
     }
 
-    // 2. Validar fechas requeridas
-    if (!planilla.fecha_declarada || !planilla.fecha_pago) {
-      throw new BadRequestException('fecha_declarada y fecha_pago deben estar definidas para calcular los aportes');
-    }
-    if (!planilla.fecha_planilla) {
-      throw new BadRequestException('fecha_planilla debe estar definida para calcular los aportes');
+    if (!planilla.fecha_declarada || !planilla.fecha_pago || !planilla.fecha_planilla) {
+      throw new BadRequestException('Faltan fechas requeridas para calcular los aportes');
     }
 
-    // 3. Ajustar fechas a la zona horaria de Bolivia (UTC-4)
     const adjustToBoliviaTime = (date: Date): Date => {
       return moment(date).tz('America/La_Paz').toDate();
     };
@@ -1746,17 +1767,15 @@ async calcularAportes(idPlanilla: number): Promise<any> {
     const fechaDeclaradaBolivia = adjustToBoliviaTime(new Date(planilla.fecha_declarada));
     const fechaPagoBolivia = adjustToBoliviaTime(new Date(planilla.fecha_pago));
 
-    // 4. Calcular la fecha límite (último día del mes SIGUIENTE a fecha_planilla)
     const getFechaLimite = (fechaPlanilla: Date): Date => {
       const baseDate = new Date(fechaPlanilla);
-      baseDate.setUTCHours(0, 0, 0, 0); // Normalizar a medianoche UTC
-      baseDate.setUTCMonth(baseDate.getUTCMonth() + 2, 0); // +2 para llegar al final del mes siguiente
-      return adjustToBoliviaTime(baseDate); // Ajustar a UTC-4
+      baseDate.setUTCHours(0, 0, 0, 0); 
+      baseDate.setUTCMonth(baseDate.getUTCMonth() + 2, 0); 
+      return adjustToBoliviaTime(baseDate);
     };
 
     const fechaLimite = getFechaLimite(fechaPlanillaBolivia);
 
-    // 5. Calcular Aporte según el tipo de empresa
     const tipoEmpresa = planilla.empresa?.tipo;
     if (!tipoEmpresa) {
       throw new BadRequestException('No se pudo determinar el tipo de empresa');
@@ -1766,45 +1785,38 @@ async calcularAportes(idPlanilla: number): Promise<any> {
     let aportePorcentaje: number;
     let tasaPorcentaje: number;
 
-    // Convertir total_importe a número
     const totalImporte = parseFloat(planilla.total_importe as any) || 0;
 
     if (tipo === 'PA') {
       aportePorcentaje = totalImporte * 0.03;
-      tasaPorcentaje = 0.03; // 3%
+      tasaPorcentaje = 0.03;
     } else if (tipo === 'AP' || tipo === 'AV' || tipo === 'VA') {
       aportePorcentaje = totalImporte * 0.1;
-      tasaPorcentaje = 0.1; // 10%
+      tasaPorcentaje = 0.1;
     } else {
       throw new BadRequestException(`Tipo de empresa no válido: ${tipoEmpresa}`);
     }
 
-    // 6. Obtener UFV Día Oblig. Formal
     const fechaDeclaradaForUfv = new Date(fechaDeclaradaBolivia);
     fechaDeclaradaForUfv.setHours(0, 0, 0, 0);
     const ufvDiaFormal = await this.getUfvForDate(fechaDeclaradaForUfv);
 
-    // 7. Obtener UFV Día Presentación (usando fecha_pago - 1 día)
     const fechaPagoForUfv = new Date(fechaPagoBolivia);
     fechaPagoForUfv.setDate(fechaPagoForUfv.getDate() - 1);
     fechaPagoForUfv.setHours(0, 0, 0, 0);
     const ufvDiaPresentacion = await this.getUfvForDate(fechaPagoForUfv);
 
-    // 8. Calcular Aporte Patronal Actualizado
     const calculoAporteActualizado = (aportePorcentaje / ufvDiaFormal) * ufvDiaPresentacion;
     const aporteActualizado = calculoAporteActualizado < aportePorcentaje ? aportePorcentaje : calculoAporteActualizado;
 
-    // 9. Calcular Monto Actualizado
     const montoActualizado = Math.max(0, aporteActualizado - aportePorcentaje);
 
-    // 10. Calcular 1% Multa por la No Presentación Planilla
     const fechaDeclaradaNormalized = new Date(fechaDeclaradaBolivia);
     fechaDeclaradaNormalized.setHours(0, 0, 0, 0);
     const fechaLimiteNormalized = new Date(fechaLimite);
     fechaLimiteNormalized.setHours(0, 0, 0, 0);
     const multaNoPresentacion = fechaDeclaradaNormalized > fechaLimiteNormalized ? aportePorcentaje * 0.01 : 0;
 
-    // 11. Calcular Días de Retraso
     const fechaPagoNormalized = new Date(fechaPagoBolivia);
     fechaPagoNormalized.setHours(0, 0, 0, 0);
     const fechaInicioRetraso = new Date(fechaLimite);
@@ -1815,48 +1827,51 @@ async calcularAportes(idPlanilla: number): Promise<any> {
       diasRetraso = Math.ceil(diferenciaEnMilisegundos / (1000 * 60 * 60 * 24));
     }
 
-    // 12. Calcular Intereses
     const intereses = (aporteActualizado * 0.0999 / 360) * diasRetraso;
-
-    // 13. Calcular Multa s/Int. 10%
     const multaSobreIntereses = intereses * 0.1;
 
-    // 14. Calcular Total a Cancelar Parcial
     const totalACancelarParcial =
-      aportePorcentaje +
-      montoActualizado +
-      multaNoPresentacion +
-      intereses +
-      multaSobreIntereses;
+      aportePorcentaje + montoActualizado + multaNoPresentacion + intereses + multaSobreIntereses;
 
-    // 15. Calcular Total Multas
     const totalMultas = multaNoPresentacion + multaSobreIntereses;
-
-    // 16. Calcular Total Tasa de Interés
     const totalTasaInteres = intereses;
 
-    // 17. Calcular Total a Cancelar (incluye 5 Bs solo para tipo 'AV')
     let formds08 = tipo === 'AV' ? 5 : 0;
-
     let totalACancelar = totalACancelarParcial + formds08;
 
-    // 18. Calcular deducciones
     let totalDeducciones = 0;
     let descuentoMinSalud = 0;
-
     if (planilla.aplica_descuento_min_salud) {
       descuentoMinSalud = aportePorcentaje * 0.05;
       totalDeducciones += descuentoMinSalud;
     }
 
-    // Convertir otros_descuentos a número
     const otrosDescuentos = parseFloat(planilla.otros_descuentos as any) || 0;
     totalDeducciones += otrosDescuentos;
 
-    // 19. Aplicar deducciones al total a cancelar
     totalACancelar = totalACancelar - totalDeducciones;
 
-    // 20. Devolver todos los valores calculados
+    // ✅ Asignar a planilla
+    planilla.aporte_porcentaje = aportePorcentaje;
+    planilla.ufv_dia_formal = ufvDiaFormal;
+    planilla.ufv_dia_presentacion = ufvDiaPresentacion;
+    planilla.aporte_actualizado = aporteActualizado;
+    planilla.monto_actualizado = montoActualizado;
+    planilla.multa_no_presentacion = multaNoPresentacion;
+    planilla.dias_retraso = diasRetraso;
+    planilla.intereses = intereses;
+    planilla.multa_sobre_intereses = multaSobreIntereses;
+    planilla.total_a_cancelar_parcial = totalACancelarParcial;
+    planilla.total_multas = totalMultas;
+    planilla.total_tasa_interes = totalTasaInteres;
+    planilla.total_a_cancelar = totalACancelar;
+    planilla.total_aportes_asuss = aportePorcentaje * 0.005;
+    planilla.total_aportes_min_salud = descuentoMinSalud;
+
+    // 🔄 Guardar cambios
+    const resultado = await this.planillaRepo.save(planilla);
+    console.log('Planilla guardada:', resultado);
+
     return {
       total_importe: totalImporte,
       aporte_porcentaje: aportePorcentaje,
@@ -2132,6 +2147,7 @@ async generarReporteAportes(idPlanilla: number): Promise<StreamableFile> {
       throw new BadRequestException(`La plantilla en ${templatePath} no existe`);
     }
 
+    console.log('Reporte de aportes generado correctamente', data);
     return new Promise<StreamableFile>((resolve, reject) => {
       carbone.render(
         templatePath,
@@ -2155,6 +2171,7 @@ async generarReporteAportes(idPlanilla: number): Promise<StreamableFile> {
         },
       );
     });
+    
   } catch (error) {
     throw new BadRequestException(`Error al generar el reporte de aportes: ${error.message}`);
   }

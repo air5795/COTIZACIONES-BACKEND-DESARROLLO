@@ -122,6 +122,9 @@ export class PlanillasAporte {
   @Column({ type: 'text', nullable: true })
   motivo_excedente: string;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  cotizacion_tasa: number;
+
   @OneToMany(() => PagoAporte, (pago) => pago.planilla)
   pagos: PagoAporte[];
 

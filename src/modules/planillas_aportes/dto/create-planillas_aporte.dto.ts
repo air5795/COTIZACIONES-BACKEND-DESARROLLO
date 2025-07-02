@@ -147,4 +147,8 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   motivo_excedente?: string;
 
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsOptional()
+  cotizacion_tasa: number;
+
 }
