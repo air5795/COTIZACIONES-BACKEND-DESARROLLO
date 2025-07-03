@@ -19,6 +19,7 @@ import { CreatePlanillaAportesDetallesDto } from './dto/create-planillas_aportes
 import { ExternalApiService } from '../api-client/service/external-api.service';
 import pLimit from 'p-limit';
 
+
 @Injectable()
 export class PlanillasAportesService {
   constructor(
@@ -47,20 +48,21 @@ async descargarPlantilla(): Promise<StreamableFile> {
 
 // 1 .-  PROCESAR EXCEL DE APORTES -------------------------------------------------------------------------------------------------------
 procesarExcel(filePath: string) {
-  try {
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { raw: false, dateNF: 'dd/mm/yyyy' });
-    console.log('Datos crudos del Excel (Fila 6, Fecha de ingreso):', data[5]?.['Fecha de ingreso']); 
-    if (!data.length) {
-      throw new BadRequestException('El archivo Excel está vacío o tiene un formato incorrecto');
+    try {
+      const workbook = xlsx.readFile(filePath);
+      const sheetName = workbook.SheetNames[0];  
+      const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+      if (!data.length) {
+        throw new BadRequestException('El archivo Excel está vacío o tiene un formato incorrecto');
+      }
+
+      fs.unlinkSync(filePath);
+      return data;
+    } catch (error) {
+      throw new BadRequestException('Error al procesar el archivo Excel');
     }
-    fs.unlinkSync(filePath);
-    return data;
-  } catch (error) {
-    throw new BadRequestException(`Error al procesar el archivo Excel: ${error.message}`);
   }
-}
 // 2 .- GUARDAR PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
 async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) {
   const { cod_patronal, gestion, mes, tipo_planilla, usuario_creacion, nombre_creacion } = createPlanillaDto;
@@ -211,8 +213,7 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     id_planilla: planillaGuardada.id_planilla_aportes,
   };
 } 
-
-  // 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
+// 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
 async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanillaDto?: CreatePlanillasAporteDto) {
   // Buscar la planilla existente
   const planilla = await this.planillaRepo.findOne({
