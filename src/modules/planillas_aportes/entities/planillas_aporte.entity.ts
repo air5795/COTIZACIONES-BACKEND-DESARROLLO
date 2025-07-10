@@ -23,7 +23,7 @@ export class PlanillasAporte {
   @Column()
   gestion: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
   total_importe: number;
 
   @Column()
@@ -56,73 +56,73 @@ export class PlanillasAporte {
   @Column({ nullable: true })
   fecha_liquidacion: Date;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   aporte_porcentaje: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 6, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   ufv_dia_formal: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 6, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   ufv_dia_presentacion: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   aporte_actualizado: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   monto_actualizado: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   multa_no_presentacion: number;
 
   @Column({ type: 'integer', nullable: true })
   dias_retraso: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   intereses: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   multa_sobre_intereses: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   total_a_cancelar_parcial: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   total_a_cancelar: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   total_multas: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   total_tasa_interes: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   total_aportes_asuss: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   total_aportes_min_salud: number;
 
   @Column({ nullable: true })
   id_empresa: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
   total_deducciones: number;
 
   @Column({ default: false })
   aplica_descuento_min_salud: boolean;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
   otros_descuentos: number;
 
   @Column({ type: 'text', nullable: true })
   motivo_otros_descuentos: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
   excedente: number;
 
   @Column({ type: 'text', nullable: true })
   motivo_excedente: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 14, scale: 6, nullable: true })
   cotizacion_tasa: number;
 
   @OneToMany(() => PagoAporte, (pago) => pago.planilla)

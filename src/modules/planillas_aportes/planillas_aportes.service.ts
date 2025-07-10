@@ -67,13 +67,11 @@ procesarExcel(filePath: string) {
 async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) {
   const { cod_patronal, gestion, mes, tipo_planilla, usuario_creacion, nombre_creacion } = createPlanillaDto;
 
-  // Buscar empresa por código patronal
   const empresa = await this.empresasService.findByCodPatronal(cod_patronal);
   if (!empresa) {
     throw new BadRequestException('No se encontró una empresa con el código patronal proporcionado');
   }
 
-  // Validar tipo de empresa
   const tipoEmpresa = empresa.tipo?.toUpperCase();
   if (!tipoEmpresa) {
     throw new BadRequestException('No se pudo determinar el tipo de empresa');
@@ -82,10 +80,8 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     throw new BadRequestException(`Tipo de empresa no válido: ${tipoEmpresa}`);
   }
 
-  // Crear fecha de la planilla
   const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
 
-  // Validar existencia de planilla mensual
   if (tipo_planilla === 'Mensual') {
     const existePlanillaMensual = await this.planillaRepo.findOne({
       where: {
@@ -100,31 +96,57 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     }
   }
 
-  // Calcular totalImporte
-  const totalImporte = data.reduce((sum, row) => {
-    const sumaFila =
-      parseFloat(row['Haber Básico'] || '0') +
-      parseFloat(row['Bono de antigüedad'] || '0') +
-      parseFloat(row['Monto horas extra'] || '0') +
-      parseFloat(row['Monto horas extra nocturnas'] || '0') +
-      parseFloat(row['Otros bonos y pagos'] || '0');
-    return sum + sumaFila;
-  }, 0);
+  // Función segura para convertir montos
+  const parseOrZero = (val: any): number => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === 'string') {
+      const clean = val.replace(/\./g, '').replace(',', '.').trim();
+      const parsed = parseFloat(clean);
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    if (typeof val === 'number') return val;
+    return 0;
+  };
 
-  // Calcular cotizacion_tasa según el tipo de empresa
+  // Calcular totalImporte
+  let totalImporte = 0;
+  data.forEach((row, index) => {
+    const haberBasico = parseOrZero(row['Haber Básico']);
+    const bonoAntiguedad = parseOrZero(row['Bono de antigüedad']);
+    const montoHorasExtra = parseOrZero(row['Monto horas extra']);
+    const montoHorasExtraNocturnas = parseOrZero(row['Monto horas extra nocturnas']);
+    const otrosBonosPagos = parseOrZero(row['Otros bonos y pagos']);
+
+    const sumaFila = haberBasico + bonoAntiguedad + montoHorasExtra + montoHorasExtraNocturnas + otrosBonosPagos;
+
+    if (isNaN(sumaFila)) {
+      console.error(`❌ NaN en fila ${index + 1}`, {
+        haberBasico,
+        bonoAntiguedad,
+        montoHorasExtra,
+        montoHorasExtraNocturnas,
+        otrosBonosPagos,
+      });
+      throw new BadRequestException(`Error al calcular total en la fila ${index + 1}: valores no numéricos`);
+    }
+
+    totalImporte += sumaFila;
+  });
+
+  console.log(`✅ totalImporte calculado: ${totalImporte.toFixed(6)}`);
+
+  // Calcular cotizacion_tasa
   let cotizacionTasa: number;
   if (tipoEmpresa === 'PA') {
-    cotizacionTasa = parseFloat((totalImporte * 0.03).toFixed(2)); // 3%
+    cotizacionTasa = parseFloat((totalImporte * 0.03).toFixed(6)); // 3%
   } else if (['AP', 'AV', 'VA'].includes(tipoEmpresa)) {
-    cotizacionTasa = parseFloat((totalImporte * 0.1).toFixed(2)); // 10%
+    cotizacionTasa = parseFloat((totalImporte * 0.1).toFixed(6)); // 10%
   } else {
     throw new BadRequestException(`Tipo de empresa no válido para cálculo de cotización: ${tipoEmpresa}`);
   }
 
-  // Total de trabajadores
   const totalTrabaj = data.length;
 
-  // Crear nueva planilla con cotizacion_tasa
   const nuevaPlanilla = this.planillaRepo.create({
     cod_patronal,
     id_empresa: empresa.id_empresa,
@@ -141,19 +163,16 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     cotizacion_tasa: cotizacionTasa,
   });
 
-  // Guardar la planilla
   const planillaGuardada = await this.planillaRepo.save(nuevaPlanilla);
 
-  // Función auxiliar para convertir y validar fechas de Excel
+  // Función para convertir fechas de Excel
   function parseExcelDate(value: any): string | undefined {
     if (!value) return undefined;
 
     if (typeof value === 'number' && !isNaN(value) && value > 0) {
       try {
         const date = new Date(1900, 0, value - 1);
-        if (isNaN(date.getTime())) {
-          throw new Error('Fecha inválida');
-        }
+        if (isNaN(date.getTime())) throw new Error('Fecha inválida');
         return date.toISOString();
       } catch {
         throw new BadRequestException(`Fecha inválida en el Excel: ${value}`);
@@ -171,48 +190,63 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     return undefined;
   }
 
-  const detalles: CreatePlanillaAportesDetallesDto[] = data.map((row) => {
+  const detalles: CreatePlanillaAportesDetallesDto[] = data.map((row, index) => {
     try {
+      const redondear = (valor: any): number => parseFloat(parseOrZero(valor).toFixed(6));
+
+      const haberBasico = redondear(row['Haber Básico']);
+      const bonoAntiguedad = redondear(row['Bono de antigüedad']);
+      const montoHorasExtra = redondear(row['Monto horas extra']);
+      const montoHorasExtraNocturnas = redondear(row['Monto horas extra nocturnas']);
+      const otrosBonosPagos = redondear(row['Otros bonos y pagos']);
+
       return {
         id_planilla_aportes: planillaGuardada.id_planilla_aportes,
-        nro: row['Nro.'],
-        ci: row['Número documento de identidad'],
-        apellido_paterno: row['Apellido Paterno'],
-        apellido_materno: row['Apellido Materno'],
-        nombres: row['Nombres'],
-        sexo: row['Sexo (M/F)'],
-        cargo: row['Cargo'],
+        nro: row['Nro.'] || index + 1,
+        ci: row['Número documento de identidad']?.toString(),
+        apellido_paterno: row['Apellido Paterno']?.toString(),
+        apellido_materno: row['Apellido Materno']?.toString(),
+        nombres: row['Nombres']?.toString(),
+        sexo: row['Sexo (M/F)']?.toString(),
+        cargo: row['Cargo']?.toString(),
         fecha_nac: parseExcelDate(row['Fecha de nacimiento']),
         fecha_ingreso: parseExcelDate(row['Fecha de ingreso']),
         fecha_retiro: parseExcelDate(row['Fecha de retiro']),
-        dias_pagados: row['Días pagados'],
-        haber_basico: parseFloat(row['Haber Básico'] || '0'),
-        bono_antiguedad: parseFloat(row['Bono de antigüedad'] || '0'),
-        monto_horas_extra: parseFloat(row['Monto horas extra'] || '0'),
-        monto_horas_extra_nocturnas: parseFloat(row['Monto horas extra nocturnas'] || '0'),
-        otros_bonos_pagos: parseFloat(row['Otros bonos y pagos'] || '0'),
-        salario: (
-          parseFloat(row['Haber Básico'] || '0') +
-          parseFloat(row['Bono de antigüedad'] || '0') +
-          parseFloat(row['Monto horas extra'] || '0') +
-          parseFloat(row['Monto horas extra nocturnas'] || '0') +
-          parseFloat(row['Otros bonos y pagos'] || '0')
-        ) || 0,
-        regional: row['regional'],
+        dias_pagados: parseInt(row['Días pagados'] || '0', 10) || null,
+        haber_basico: haberBasico,
+        bono_antiguedad: bonoAntiguedad,
+        monto_horas_extra: montoHorasExtra,
+        monto_horas_extra_nocturnas: montoHorasExtraNocturnas,
+        otros_bonos_pagos: otrosBonosPagos,
+        salario: parseFloat((haberBasico + bonoAntiguedad + montoHorasExtra + montoHorasExtraNocturnas + otrosBonosPagos).toFixed(6)),
+        regional: row['regional']?.toString(),
       };
     } catch (error) {
-      throw new BadRequestException(`Error en la fila ${row['Nro.']}: ${error.message}`);
+      throw new BadRequestException(`Error en la fila ${row['Nro.'] || index + 1}: ${error.message}`);
     }
   });
 
-  // Guardar detalles
-  await this.detalleRepo.save(detalles);
+  const batchSize = 1000;
+  const totalDetalles = detalles.length;
+  console.log(`Total de registros a guardar: ${totalDetalles}`);
+
+  for (let i = 0; i < totalDetalles; i += batchSize) {
+    const batch = detalles.slice(i, i + batchSize);
+    console.log(`Guardando lote ${i / batchSize + 1} (${batch.length} registros)`);
+    try {
+      await this.detalleRepo.save(batch, { chunk: 1000 });
+    } catch (error) {
+      console.error(`Error al guardar lote ${i / batchSize + 1}:`, error);
+      throw new BadRequestException(`Error al guardar lote ${i / batchSize + 1}: ${error.message}`);
+    }
+  }
 
   return {
     mensaje: '✅ Planilla guardada con éxito',
     id_planilla: planillaGuardada.id_planilla_aportes,
   };
-} 
+}
+
 // 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
 async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanillaDto?: CreatePlanillasAporteDto) {
   // Buscar la planilla existente
@@ -773,10 +807,15 @@ async obtenerPlanilla(id_planilla: number) {
 
     const mappedPlanilla = {
       id_planilla_aportes: planilla.id_planilla_aportes,
-      id_empresa: planilla.id_empresa,  
+      id_empresa: planilla.id_empresa,
+      empresa: planilla.empresa
+        ? {
+            nombre: planilla.empresa.emp_nom,
+            tipo: planilla.empresa.tipo,
+          }
+        : null,  
       com_nro: planilla.com_nro,
       cod_patronal: planilla.cod_patronal,
-      empresa: planilla.empresa ? planilla.empresa.emp_nom : null,
       mes: planilla.mes,
       gestion: planilla.gestion,
       total_importe: planilla.total_importe,
@@ -1116,7 +1155,7 @@ async corregirPlanilla(id_planilla: number, data: any) {
 
   const planilla = await this.planillaRepo.findOne({ 
     where: { id_planilla_aportes: id_planilla },
-    relations: ['empresa'], // Necesitamos la relación con empresa para obtener emp_nom
+    relations: ['empresa'],
   });
 
   if (!planilla) {
@@ -1589,111 +1628,102 @@ async generarReporteBajas(id_planilla: number,cod_patronal: string): Promise<Str
 // 20 .- Metodo para obtener los datos de la planilla por regional (se usa en la parte de resumen de planilla para mostrar al empleador y administrador) 
 async obtenerDatosPlanillaPorRegional(id_planilla: number): Promise<any> {
   try {
-    // Obtener la información de la planilla y sus detalles
-    const resultadoPlanilla = await this.obtenerPlanilla(id_planilla);
-    // Usa limite: 0 para traer todos los registros sin paginación
-    const detallesPlanilla = await this.obtenerDetalles(id_planilla, 1, 0);
-    console.log('Total de trabajadores crudos:', detallesPlanilla.trabajadores.length);
+    console.log('🔍 Obteniendo planilla y detalles para id_planilla:', id_planilla);
 
-    // Verifica cuántos trabajadores se obtienen inicialmente
-    console.log('1. Total de trabajadores crudos:', detallesPlanilla.trabajadores.length);
-    console.log('1.1. Primeros 5 trabajadores (muestra):', detallesPlanilla.trabajadores.slice(0, 5));
+    const resultadoPlanilla = await this.obtenerPlanilla(id_planilla);
+    console.log('✅ Planilla obtenida:', resultadoPlanilla.planilla);
+
+    const detallesPlanilla = await this.obtenerDetalles(id_planilla, 1, 0);
+    console.log('👥 Trabajadores obtenidos:', detallesPlanilla.trabajadores.length);
 
     if (!detallesPlanilla.trabajadores.length) {
       throw new Error('No se encontraron trabajadores para los datos de la planilla.');
     }
 
-    // Extraer la información de la planilla
     const planilla = resultadoPlanilla.planilla;
 
-    // Variables para la sección "totales"
+    // Validar tipo de empresa y tasa
+    const tipoEmpresa = planilla?.empresa?.tipo?.toUpperCase();
+    console.log('🏢 Tipo de empresa:', tipoEmpresa);
+
+    if (!['PA', 'AP', 'AV', 'VA'].includes(tipoEmpresa)) {
+      throw new Error(`Tipo de empresa no válido: ${tipoEmpresa}`);
+    }
+
+    const tasaCotizacion = tipoEmpresa === 'PA' ? 0.03 : 0.10;
+    console.log('📊 Tasa de cotización usada:', tasaCotizacion);
+
+    // Variables para resumen
     let totalCantidad = 0;
     let totalGanado = 0;
-
-    // Agrupar los datos por regional
     const regionalesMap = new Map();
 
-    detallesPlanilla.trabajadores.forEach((trabajador, index) => {
+    detallesPlanilla.trabajadores.forEach((trabajador) => {
       const { regional, salario } = trabajador;
       const salarioNum = parseFloat(salario.toString());
-
-      // Muestra algunos trabajadores para verificar sus datos
-      if (index < 5 || index >= detallesPlanilla.trabajadores.length - 5) {
-        console.log(`2. Procesando trabajador #${index + 1}:`, { regional, salario });
-      }
 
       if (!regionalesMap.has(regional)) {
         regionalesMap.set(regional, {
           regional,
           cantidad: 0,
           total_ganado: 0,
-          porcentaje_10: 0
+          cotizacion: 0
         });
       }
 
-      const regionalData = regionalesMap.get(regional);
-      regionalData.cantidad += 1;
-      regionalData.total_ganado += salarioNum;
-      regionalData.porcentaje_10 = parseFloat((regionalData.total_ganado * 0.10).toFixed(2));
+      const regionData = regionalesMap.get(regional);
+      regionData.cantidad += 1;
+      regionData.total_ganado += salarioNum;
+      regionData.cotizacion = parseFloat((regionData.total_ganado * tasaCotizacion).toFixed(2));
 
       totalCantidad += 1;
       totalGanado += salarioNum;
     });
 
-    // Verifica los resultados después de procesar
-    console.log('3. Totales calculados:', { totalCantidad, totalGanado });
-    console.log('3.1. Regionales procesadas (Map):', Array.from(regionalesMap.entries()));
-
-    // Convertir el mapa a un array
     const resumenArray = Array.from(regionalesMap.values());
 
-    // Verifica el resumen antes de formatear
-    console.log('4. Resumen sin formatear:', resumenArray);
-
-    // Crear la sección de totales separada
-    const totales = {
+    console.log('📋 Resumen por regional:', resumenArray);
+    console.log('📦 Totales generales antes de formatear:', {
       cantidad_total: totalCantidad,
-      total_ganado: parseFloat(totalGanado.toFixed(2)),
-      porcentaje_10: parseFloat((totalGanado * 0.10).toFixed(2))
-    };
+      total_ganado: totalGanado,
+      cotizacion: totalGanado * tasaCotizacion,
+    });
 
-    // Formato de números
     const formatNumber = (num: number) => new Intl.NumberFormat('en-US', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     }).format(num);
 
-    // Formatear los datos
     const formattedResumen = resumenArray.map(region => ({
       regional: region.regional,
       cantidad: formatNumber(region.cantidad),
       total_ganado: formatNumber(region.total_ganado),
-      porcentaje_10: formatNumber(region.porcentaje_10)
+      cotizacion: formatNumber(region.cotizacion)
     }));
 
     const formattedTotales = {
-      cantidad_total: formatNumber(totales.cantidad_total),
-      total_ganado: formatNumber(totales.total_ganado),
-      porcentaje_10: formatNumber(totales.porcentaje_10)
+      cantidad_total: formatNumber(totalCantidad),
+      total_ganado: formatNumber(totalGanado),
+      cotizacion: formatNumber(totalGanado * tasaCotizacion)
     };
 
-    // Estructura final del JSON
-    const data = {
+    console.log('✅ Resumen formateado:', formattedResumen);
+    console.log('✅ Totales formateados:', formattedTotales);
+
+    return {
       mensaje: 'Detalles obtenidos con éxito',
-      planilla: planilla,
+      planilla,
       resumen: formattedResumen,
       totales: formattedTotales
     };
 
-    // Verifica el resultado final
-    console.log('5. Respuesta final:', data);
-
-    return data;
-
   } catch (error) {
+    console.error('❌ Error en obtenerDatosPlanillaPorRegional:', error.message);
     throw new Error('Error en obtenerDatosPlanillaPorRegional: ' + error.message);
   }
 }
+
+
 // 21 ACTUALIZAR FECHA PAGO EN PLANILLA APORTE --------------------------------------------------------------------------------------------------------------------------------------------------------------
 async actualizarFechaPago(id_planilla: number, fechaPago?: Date) {
   const planilla = await this.planillaRepo.findOne({ where: { id_planilla_aportes: id_planilla } });

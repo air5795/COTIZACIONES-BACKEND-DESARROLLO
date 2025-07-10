@@ -4,14 +4,14 @@ export class CreatePlanillasAporteDto {
   @IsString()
   cod_patronal: string;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
-  @IsOptional() // Hacer opcional porque se calcula en el servicio
+  @IsOptional() 
   total_importe?: number;
 
   @IsInt()
   @Min(0)
-  @IsOptional() // Hacer opcional porque se calcula en el servicio
+  @IsOptional() 
   total_trabaj?: number;
 
   @IsString()
@@ -60,7 +60,7 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   fecha_liquidacion?: string;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   aporte_porcentaje?: number;
 
@@ -72,15 +72,15 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   ufv_dia_presentacion?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   aporte_actualizado?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   monto_importe?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   multa_no_presentacion?: number;
 
@@ -88,35 +88,35 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   dias_retraso?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   intereses?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   multa_sobre_intereses?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   total_a_cancelar?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   total_multas?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   total_tasa_interes?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   total_aportes_asuss?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   total_aportes_min_salud?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   total_a_cancelar_parcial?: number;
 
@@ -124,14 +124,14 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   id_empresa?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   total_deducciones?: number;
 
   @IsOptional()
   aplica_descuento_min_salud?: boolean;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   otros_descuentos?: number;
 
@@ -139,7 +139,7 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   motivo_otros_descuentos?: string;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   excedente?: number;
 
@@ -147,7 +147,7 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   motivo_excedente?: string;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @IsOptional()
   cotizacion_tasa: number;
 

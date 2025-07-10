@@ -48,7 +48,7 @@ export class CreatePlanillaAportesDetallesDto {
   @IsOptional()
   dias_pagados?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   @IsOptional()
   salario?: number;
@@ -57,27 +57,27 @@ export class CreatePlanillaAportesDetallesDto {
   @IsOptional()
   regional?: string;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   @IsOptional()
   haber_basico?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   @IsOptional()
   bono_antiguedad?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   @IsOptional()
   monto_horas_extra?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   @IsOptional()
   monto_horas_extra_nocturnas?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   @IsOptional()
   otros_bonos_pagos?: number;
