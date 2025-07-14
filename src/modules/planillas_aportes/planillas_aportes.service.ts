@@ -18,6 +18,7 @@ import { CreatePlanillasAporteDto } from './dto/create-planillas_aporte.dto';
 import { CreatePlanillaAportesDetallesDto } from './dto/create-planillas_aportes_detalles.dto';
 import { ExternalApiService } from '../api-client/service/external-api.service';
 import pLimit from 'p-limit';
+import { number } from 'joi';
 
 
 @Injectable()
@@ -248,8 +249,9 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
 }
 
 // 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
-async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanillaDto?: CreatePlanillasAporteDto) {
-  // Buscar la planilla existente
+async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaDto?: CreatePlanillasAporteDto) {
+  
+
   const planilla = await this.planillaRepo.findOne({
     where: { id_planilla_aportes: id_planilla },
     relations: ['empresa'],
@@ -259,12 +261,10 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
     throw new NotFoundException('❌ La planilla no existe.');
   }
 
-  // Validar que la planilla esté en estado borrador (estado = 0)
   if (planilla.estado !== 0) {
     throw new BadRequestException('❌ Solo se pueden actualizar planillas en estado borrador.');
   }
 
-  // Validar que los datos no estén vacíos
   const datosValidos = data.filter(row =>
     row['Número documento de identidad'] &&
     row['Nombres'] &&
@@ -275,19 +275,17 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
     throw new BadRequestException('❌ No se encontraron registros válidos en el archivo.');
   }
 
-  // Si se proporciona un DTO, actualizar campos relevantes de la planilla
   if (createPlanillaDto) {
     const { cod_patronal, gestion, mes, tipo_planilla } = createPlanillaDto;
 
-    // Validar empresa
     const empresa = await this.empresasService.findByCodPatronal(cod_patronal);
     if (!empresa) {
       throw new BadRequestException('No se encontró una empresa con el código patronal proporcionado');
     }
 
-    // Validar si ya existe una planilla mensual para el mismo mes y gestión
     if (tipo_planilla === 'Mensual') {
       const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
+
       const existePlanillaMensual = await this.planillaRepo.findOne({
         where: {
           cod_patronal,
@@ -301,7 +299,6 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
         throw new BadRequestException('Ya existe una planilla Mensual para este mes y gestión.');
       }
 
-      // Actualizar campos de la planilla
       planilla.cod_patronal = cod_patronal;
       planilla.id_empresa = empresa.id_empresa;
       planilla.fecha_planilla = fechaPlanilla;
@@ -311,49 +308,38 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
     }
   }
 
-  // Calcular total_importe y total_trabaj
-  const totalImporte = datosValidos.reduce((sum, row) => {
-    const sumaFila =
-      parseFloat(row['Haber Básico'] || '0') +
-      parseFloat(row['Bono de antigüedad'] || '0') +
-      parseFloat(row['Monto horas extra'] || '0') +
-      parseFloat(row['Monto horas extra nocturnas'] || '0') +
-      parseFloat(row['Otros bonos y pagos'] || '0');
-    return sum + sumaFila;
-  }, 0);
-
-  const totalTrabaj = datosValidos.length;
-
-  // Función auxiliar para convertir y validar fechas de Excel (reutilizada de guardarPlanilla)
   function parseExcelDate(value: any): string | undefined {
     if (!value) return undefined;
 
     if (typeof value === 'number' && !isNaN(value) && value > 0) {
-      try {
-        const date = new Date(1900, 0, value - 1);
-        if (isNaN(date.getTime())) {
-          throw new Error('Fecha inválida');
-        }
-        return date.toISOString();
-      } catch {
-        throw new BadRequestException(`Fecha inválida en el Excel: ${value}`);
-      }
+      const date = new Date(1900, 0, value - 1);
+      return isNaN(date.getTime()) ? undefined : date.toISOString();
     }
 
     if (typeof value === 'string') {
       const parsedDate = moment(value, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY'], true);
-      if (parsedDate.isValid()) {
-        return parsedDate.toISOString();
-      }
+      if (parsedDate.isValid()) return parsedDate.toISOString();
       throw new BadRequestException(`Formato de fecha no válido: ${value}`);
     }
 
     return undefined;
   }
 
-  // Mapear los datos a CreatePlanillaAportesDetallesDto
+  let totalImporte = 0;
+  const totalTrabaj = datosValidos.length;
+
   const nuevosDetalles: CreatePlanillaAportesDetallesDto[] = datosValidos.map((row) => {
     try {
+      const haber_basico = parseFloat(row['Haber Básico'] || '0');
+      const bono_antiguedad = parseFloat(row['Bono de antigüedad'] || '0');
+      const horas_extra = parseFloat(row['Monto horas extra'] || '0');
+      const horas_extra_nocturnas = parseFloat(row['Monto horas extra nocturnas'] || '0');
+      const otros_bonos = parseFloat(row['Otros bonos y pagos'] || '0');
+
+      const salario = haber_basico + bono_antiguedad + horas_extra + horas_extra_nocturnas + otros_bonos;
+
+      totalImporte += salario;
+
       return {
         id_planilla_aportes: id_planilla,
         nro: row['Nro.'] || 0,
@@ -367,18 +353,12 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
         fecha_ingreso: parseExcelDate(row['Fecha de ingreso']),
         fecha_retiro: parseExcelDate(row['Fecha de retiro']),
         dias_pagados: row['Días pagados'] || 0,
-        haber_basico: parseFloat(row['Haber Básico'] || '0'),
-        bono_antiguedad: parseFloat(row['Bono de antigüedad'] || '0'),
-        monto_horas_extra: parseFloat(row['Monto horas extra'] || '0'),
-        monto_horas_extra_nocturnas: parseFloat(row['Monto horas extra nocturnas'] || '0'),
-        otros_bonos_pagos: parseFloat(row['Otros bonos y pagos'] || '0'),
-        salario: (
-          parseFloat(row['Haber Básico'] || '0') +
-          parseFloat(row['Bono de antigüedad'] || '0') +
-          parseFloat(row['Monto horas extra'] || '0') +
-          parseFloat(row['Monto horas extra nocturnas'] || '0') +
-          parseFloat(row['Otros bonos y pagos'] || '0')
-        ) || 0,
+        haber_basico,
+        bono_antiguedad,
+        monto_horas_extra: horas_extra,
+        monto_horas_extra_nocturnas: horas_extra_nocturnas,
+        otros_bonos_pagos: otros_bonos,
+        salario,
         regional: row['regional'] || '',
       };
     } catch (error) {
@@ -386,24 +366,36 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
     }
   });
 
-  // Eliminar los detalles anteriores
   await this.detalleRepo.delete({ id_planilla_aportes: id_planilla });
 
-  // Guardar los nuevos detalles
-  await this.detalleRepo.save(nuevosDetalles);
+  const batchSize = 1000;
+  const totalnuevosDetalles = nuevosDetalles.length;
+  console.log(`Total de registros a guardar: ${totalnuevosDetalles}`);
+  
 
-  // Actualizar la planilla
-  planilla.total_importe = totalImporte;
+  for (let i = 0; i < totalnuevosDetalles; i += batchSize) {
+    const batch = nuevosDetalles.slice(i, i + batchSize);
+    console.log(`Guardando lote ${i / batchSize + 1} (${batch.length} registros)`);
+    try {
+      await this.detalleRepo.save(batch, { chunk: 1000 });
+    } catch (error) {
+      console.error(`Error al guardar lote ${i / batchSize + 1}:`, error);
+      throw new BadRequestException(`Error al guardar lote ${i / batchSize + 1}: ${error.message}`);
+    }
+  }
+
+  planilla.total_importe = parseFloat(totalImporte.toFixed(6));
   planilla.total_trabaj = totalTrabaj;
   await this.planillaRepo.save(planilla);
 
   return {
     mensaje: '✅ Detalles de la planilla actualizados con éxito',
     id_planilla: planilla.id_planilla_aportes,
-    total_importe: totalImporte,
+    total_importe: planilla.total_importe,
     total_trabajadores: totalTrabaj,
   };
 }
+
 // 4 .- OBTENER HISTORIAL DETALLADO PAGINACION Y BUSQUEDA DE TABLA PLANILLAS DE APORTES -------------------------------------------------------------------------------------------------------
 async obtenerHistorial(cod_patronal: string,pagina: number = 1,limite: number = 10,busqueda: string = '', mes?: string, anio?: string) {
   try {
@@ -2218,9 +2210,19 @@ async generarReportePlanillaPorRegional(idPlanilla: number): Promise<StreamableF
       throw new Error('Planilla no encontrada o sin datos');
     }
 
-    const porcentaje = datosPlanilla.planilla.total_importe * 0.10;
+    /* const porcentaje = datosPlanilla.planilla.total_importe * 0.10; */
+    const totalimporte = parseFloat(datosPlanilla.planilla.total_importe).toFixed(2);
+    let tasa = 0;
+
+    if (datosPlanilla.planilla.empresa.tipo == 'PA') {
+    tasa = 3;  
+    } else {
+    tasa = 10;
+    }
 
     moment.locale('es');
+    /* const metadato = moment(); */
+    const metadato = moment().tz('America/La_Paz');
 
     const data = {
       planilla: {
@@ -2230,27 +2232,35 @@ async generarReportePlanillaPorRegional(idPlanilla: number): Promise<StreamableF
         fecha_declarada: moment(datosPlanilla.planilla.fecha_declarada).format('DD/MM/YYYY'),
         fecha_pago: moment(datosPlanilla.planilla.fecha_pago).format('DD/MM/YYYY'),
         tipo_empresa: datosPlanilla.planilla.tipo_empresa,
-        total_importe: datosPlanilla.planilla.total_importe,
+        total_importe: totalimporte,
         aporte_porcentaje: datosPlanilla.planilla.aporte_porcentaje,
-        empresa: datosPlanilla.planilla.empresa,
+        empresa: datosPlanilla.planilla.empresa.nombre,
         total_trabaj: datosPlanilla.planilla.total_trabaj,
         com_nro: datosPlanilla.planilla.com_nro,
         aporte_porce: datosPlanilla.planilla.aporte_porcentaje,
         patronal: datosPlanilla.planilla.cod_patronal,
-        porcentaje: porcentaje,
+        porcentaje: datosPlanilla.totales.cotizacion,
+        tasa: tasa,
+        presentado_por: datosPlanilla.planilla.nombre_creacion,
         
       },
       resumen: datosPlanilla.resumen.map(region => ({
         regional: region.regional,
         cantidad: region.cantidad,
         total_ganado: region.total_ganado,
-        porcentaje_10: region.porcentaje_10,
+        cotizacion: region.cotizacion,
       })),
       totales: {
         cantidad_total: datosPlanilla.totales.cantidad_total,
         total_ganado: datosPlanilla.totales.total_ganado,
-        porcentaje_10: datosPlanilla.totales.porcentaje_10,
+        cotizacion: datosPlanilla.totales.cotizacion,
       },
+      metadatos: {
+        generado_por: datosPlanilla.planilla.usuario_creacion, 
+        fecha_reporte: metadato.format('DD/MM/YYYY'),
+        hora_reporte: metadato.format('HH:mm:ss'),
+        nota: 'Reporte generado automáticamente por el sistema - CBES',
+  },
     };
 
     console.log('Datos para el reporte por regional:', JSON.stringify(data, null, 2));

@@ -41,22 +41,22 @@ export class PlanillaAportesDetalles {
   @Column()
   dias_pagados: number;
 
-  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
+  @Column({ type: 'decimal', precision: 18, scale: 6, default: 0 })
   haber_basico: number;
 
-  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
+  @Column({ type: 'decimal', precision: 18, scale: 6, default: 0 })
   bono_antiguedad: number;
 
-  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
+  @Column({ type: 'decimal', precision: 18, scale: 6, default: 0 })
   monto_horas_extra: number;
 
-  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
+  @Column({ type: 'decimal', precision: 18, scale: 6, default: 0 })
   monto_horas_extra_nocturnas: number;
 
-  @Column({ type: 'decimal', precision: 14, scale: 6, default: 0 })
+  @Column({ type: 'decimal', precision: 18, scale: 6, default: 0 })
   otros_bonos_pagos: number;
 
-  @Column({ type: 'decimal', precision: 14, scale: 6 })
+  @Column({ type: 'decimal', precision: 18, scale: 6 })
   salario: number;
 
   @Column()
