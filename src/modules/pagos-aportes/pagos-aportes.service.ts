@@ -239,7 +239,8 @@ async generarReportePagoAporte(idPlanillaAportes: number): Promise<StreamableFil
     console.log('Datos para el reporte:', data);
 
     // Ruta de la plantilla de Carbone
-    const templatePath = path.resolve('src/modules/pagos-aportes/templates/recibo.docx');
+    /* const templatePath = path.resolve('src/modules/pagos-aportes/templates/recibo.docx'); */
+    const templatePath = path.resolve(process.cwd(), 'reports/recibo.docx');
     console.log('Ruta de la plantilla:', templatePath);
 
     // Verificar si la plantilla existe
@@ -288,7 +289,7 @@ async findAllWithDetails() {
     const pagos = await this.pagoAporteRepository
       .createQueryBuilder('pago')
       .leftJoinAndSelect('pago.planilla', 'planilla')
-      .leftJoinAndSelect('planilla.empresa', 'empresa') // Cargar la relación empresa
+      .leftJoinAndSelect('planilla.empresa.nombre', 'empresa') // Cargar la relación empresa
       .getMany();
 
     // Formatear los datos

@@ -36,10 +36,10 @@ export class PlanillasAportesService {
     private readonly externalApiService: ExternalApiService,
   ) {}
 
-//(ESTATICAS ) DESCARGAR PLANILLA DE EXCEL PARA PLANILLAS DE APORTES
+//* DESCARGAR PLANTILLA DE EXCEL PARA PLANILLAS DE APORTES
 async descargarPlantilla(): Promise<StreamableFile> {
-  const filePath = path.join(process.cwd(), 'src', 'public', 'plantilla.xlsx');
-  console.log('Ruta del archivo:', filePath); // Para depuración
+  const filePath = path.resolve(process.cwd(), 'reports/plantilla.xlsx');
+  console.log('Ruta del archivo:', filePath);
   if (!fs.existsSync(filePath)) {
     throw new BadRequestException('La plantilla no se encuentra en el servidor');
   }
@@ -2085,7 +2085,7 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
   }
 }
 
-// 25 .- reporte DS 08 
+//* 25 .- REPORTE FORMULARIO DS-08 (NOMBRE EN FRONT : FORMULARIO DS-08)
 async generarReporteAportes(idPlanilla: number): Promise<StreamableFile> {
   try {
     // Validar parámetro
@@ -2160,10 +2160,8 @@ async generarReporteAportes(idPlanilla: number): Promise<StreamableFile> {
       },
     };
 
-    // Ruta de la plantilla de Carbone
-    const templatePath = path.resolve(
-      'src/modules/planillas_aportes/templates/resumen_mensual.docx',
-    );
+
+    const templatePath = path.resolve(process.cwd(), 'reports/resumen_mensual.docx');
 
     // Verificar si la plantilla existe
     if (!fs.existsSync(templatePath)) {
@@ -2200,7 +2198,7 @@ async generarReporteAportes(idPlanilla: number): Promise<StreamableFile> {
   }
 }
 
- // 26 .- REPORTE DE DECLRACION DE APORTE Y MUESTRA REGIONALES 
+ //* 26 .- REPORTE DE DECLARACION DE APORTE Y MUESTRA REGIONALES (NOMBRE EN FRONT : DECLARACION PDF)
 async generarReportePlanillaPorRegional(idPlanilla: number): Promise<StreamableFile> {
   try {
 
@@ -2265,10 +2263,7 @@ async generarReportePlanillaPorRegional(idPlanilla: number): Promise<StreamableF
 
     console.log('Datos para el reporte por regional:', JSON.stringify(data, null, 2));
 
-    // Ruta de la plantilla de Carbone (crea esta plantilla según tu diseño)
-    const templatePath = path.resolve(
-      'src/modules/planillas_aportes/templates/resumen.docx',
-    );
+    const templatePath = path.resolve(process.cwd(), 'reports/resumen.docx');
 
     // Verificar si la plantilla existe
     if (!fs.existsSync(templatePath)) {
@@ -2306,7 +2301,7 @@ async generarReportePlanillaPorRegional(idPlanilla: number): Promise<StreamableF
   }
 }
 
-// 27 .- REPORTE DE APORTES RECIBIDOS POR MES
+//! 27 .- REPORTE DE APORTES RECIBIDOS POR MES (NOMBRE EN FRONT : VER APORTES POR MES Y AÑO)(OJO REVISAR)
 async generarReporteHistorial(mes?: number, gestion?: number): Promise<StreamableFile> {
   try {
     // Validar parámetros
@@ -2374,10 +2369,10 @@ async generarReporteHistorial(mes?: number, gestion?: number): Promise<Streamabl
       })),
     };
 
-    // Ruta de la plantilla de Carbone
-    const templatePath = path.resolve(
-      'src/modules/planillas_aportes/templates/aportes-mensuales.docx',
-    );
+
+    const templatePath = path.resolve(process.cwd(), 'reports/aportes-mensuales.docx');
+
+    
 
     // Verificar si la plantilla existe
     if (!fs.existsSync(templatePath)) {
@@ -2519,7 +2514,7 @@ async validarLiquidacion(idPlanilla: number, payload: { fecha_pago?: string }): 
   };
 }
 
-// 30 .- REPORTE AFILIACIONES VIGENTES NO VIGENTES
+//* 30 .- REPORTE AFILIACIONES VIGENTES NO VIGENTES (NOMBRE EN FRONT : REPORTE AFILIACIONES)
 async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
   try {
     // Fetch planilla data
@@ -2588,10 +2583,7 @@ async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
 
     console.log('Datos para el reporte de afiliación:', JSON.stringify(data, null, 2));
 
-    // Path to the Carbone template
-    const templatePath = path.resolve(
-      'src/modules/planillas_aportes/templates/reporte_afiliacion.docx',
-    );
+    const templatePath = path.resolve(process.cwd(), 'reports/reporte_afiliacion.docx');
 
     // Verify template exists
     if (!fs.existsSync(templatePath)) {
@@ -2632,7 +2624,7 @@ async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
 
 }
 
-// 31.- REPORTE DE DETALLES DE PLANILLA EN EXCEL 
+//* 31.- REPORTE DE DETALLES DE PLANILLA EN EXCEL (NOMBRE EN FRONT : PLANILLA EXCEL)
 async generarReporteDetallesExcel(idPlanilla: number): Promise<StreamableFile> {
   try {
     // Obtener datos de la planilla
@@ -2699,10 +2691,7 @@ async generarReporteDetallesExcel(idPlanilla: number): Promise<StreamableFile> {
 
     console.log('Datos para el reporte de detalles:', JSON.stringify(data, null, 2));
 
-    // Ruta a la plantilla Excel
-    const templatePath = path.resolve(
-      'src/modules/planillas_aportes/templates/reporte_planilla_detalles.xlsx',
-    );
+    const templatePath = path.resolve(process.cwd(), 'reports/reporte_planilla_detalles.xlsx');
 
     // Verificar que la plantilla existe
     if (!fs.existsSync(templatePath)) {
