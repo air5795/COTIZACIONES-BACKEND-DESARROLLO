@@ -2160,8 +2160,7 @@ async generarReporteAportes(idPlanilla: number): Promise<StreamableFile> {
       },
     };
 
-
-    const templatePath = path.resolve(process.cwd(), 'reports/resumen_mensual.docx');
+    const templatePath = path.resolve('reports/resumen_mensual.docx');
 
     // Verificar si la plantilla existe
     if (!fs.existsSync(templatePath)) {
@@ -2263,7 +2262,7 @@ async generarReportePlanillaPorRegional(idPlanilla: number): Promise<StreamableF
 
     console.log('Datos para el reporte por regional:', JSON.stringify(data, null, 2));
 
-    const templatePath = path.resolve(process.cwd(), 'reports/resumen.docx');
+    const templatePath = path.resolve('reports/resumen.docx');
 
     // Verificar si la plantilla existe
     if (!fs.existsSync(templatePath)) {
@@ -2583,7 +2582,7 @@ async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
 
     console.log('Datos para el reporte de afiliación:', JSON.stringify(data, null, 2));
 
-    const templatePath = path.resolve(process.cwd(), 'reports/reporte_afiliacion.docx');
+    const templatePath = path.resolve('reports/reporte_afiliacion.docx');
 
     // Verify template exists
     if (!fs.existsSync(templatePath)) {
@@ -2691,7 +2690,7 @@ async generarReporteDetallesExcel(idPlanilla: number): Promise<StreamableFile> {
 
     console.log('Datos para el reporte de detalles:', JSON.stringify(data, null, 2));
 
-    const templatePath = path.resolve(process.cwd(), 'reports/reporte_planilla_detalles.xlsx');
+    const templatePath = path.resolve('reports/reporte_planilla_detalles.xlsx');
 
     // Verificar que la plantilla existe
     if (!fs.existsSync(templatePath)) {

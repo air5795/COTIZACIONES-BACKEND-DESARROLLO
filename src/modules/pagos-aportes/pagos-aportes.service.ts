@@ -240,7 +240,7 @@ async generarReportePagoAporte(idPlanillaAportes: number): Promise<StreamableFil
 
     // Ruta de la plantilla de Carbone
     /* const templatePath = path.resolve('src/modules/pagos-aportes/templates/recibo.docx'); */
-    const templatePath = path.resolve(process.cwd(), 'reports/recibo.docx');
+    const templatePath = path.resolve('reports/recibo.docx');
     console.log('Ruta de la plantilla:', templatePath);
 
     // Verificar si la plantilla existe
