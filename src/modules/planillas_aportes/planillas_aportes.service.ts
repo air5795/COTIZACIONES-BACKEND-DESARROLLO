@@ -38,7 +38,7 @@ export class PlanillasAportesService {
 
 //* DESCARGAR PLANTILLA DE EXCEL PARA PLANILLAS DE APORTES
 async descargarPlantilla(): Promise<StreamableFile> {
-  const filePath = path.resolve(__dirname, '../../../reports/plantilla.xlsx');
+  const filePath = path.resolve('reports/plantilla.xlsx',);
   console.log('Ruta generada:', filePath);
   if (!fs.existsSync(filePath)) {
     throw new BadRequestException('La plantilla no se encuentra en el servidor');
