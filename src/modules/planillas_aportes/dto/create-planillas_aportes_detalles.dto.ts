@@ -89,4 +89,11 @@ export class CreatePlanillaAportesDetallesDto {
   @IsDateString()
   @IsOptional()
   fecha_creacion?: string;
+
+
+  
+
+
+
+
 }

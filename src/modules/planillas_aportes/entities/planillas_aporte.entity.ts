@@ -125,10 +125,26 @@ export class PlanillasAporte {
   @Column({ type: 'decimal', precision: 18, scale: 6, nullable: true })
   cotizacion_tasa: number;
 
+  @Column({ nullable: true })
+  id_planilla_origen?: number;
+
   @OneToMany(() => PagoAporte, (pago) => pago.planilla)
   pagos: PagoAporte[];
 
   @ManyToOne(() => Empresa, (empresa) => empresa.planillasAportes, { nullable: true })
   @JoinColumn({ name: 'id_empresa' })
   empresa: Empresa;
+
+  @ManyToOne(() => PlanillasAporte, { nullable: true })
+  @JoinColumn({ name: 'id_planilla_origen' })
+  planillaOrigen?: PlanillasAporte;
+
+  @OneToMany(() => PlanillasAporte, (p) => p.planillaOrigen)
+  planillasAdicionales?: PlanillasAporte[];
+
+  @OneToMany(() => PlanillaAportesDetalles, detalle => detalle.planilla_aporte)
+  detalles: PlanillaAportesDetalles[];
+
+  
+
 }

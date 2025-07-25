@@ -151,4 +151,13 @@ export class CreatePlanillasAporteDto {
   @IsOptional()
   cotizacion_tasa: number;
 
+  @IsOptional()
+  @IsInt()
+  id_planilla_origen?: number;
+
+  @IsString()
+  @IsOptional()
+  tipo?: 'mensual' | 'planilla_adicional';
+
+
 }

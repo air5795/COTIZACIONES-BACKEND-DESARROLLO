@@ -46,6 +46,54 @@ async descargarPlantilla(): Promise<StreamableFile> {
   const fileStream = fs.createReadStream(filePath);
   return new StreamableFile(fileStream);
 }
+//? MÉTODO AUXILIAR: Actualizar totales de la planilla mensual con todos sus adicionales
+private async actualizarTotalesPlanillaMensual(idPlanillaMensual: number, tipoEmpresa: string) {
+  // Obtener todas las planillas relacionadas (mensual + adicionales)
+  const planillasRelacionadas = await this.planillaRepo.find({
+    where: [
+      { id_planilla_aportes: idPlanillaMensual }, // La mensual
+      { id_planilla_origen: idPlanillaMensual }   // Todas las adicionales
+    ]
+  });
+
+  const idsToCheck = planillasRelacionadas.map(p => p.id_planilla_aportes);
+
+  // Calcular totales consolidados desde los detalles
+  const totalesConsolidados = await this.detalleRepo
+    .createQueryBuilder('detalle')
+    .select([
+      'SUM(detalle.salario) as total_importe',
+      'COUNT(*) as total_trabajadores'
+    ])
+    .where('detalle.id_planilla_aportes IN (:...ids)', { ids: idsToCheck })
+    .getRawOne();
+
+  const totalImporte = parseFloat(totalesConsolidados?.total_importe || '0');
+  const totalTrabajadores = parseInt(totalesConsolidados?.total_trabajadores || '0');
+
+  // Calcular nueva cotización tasa
+  let cotizacionTasa: number;
+  if (tipoEmpresa === 'PA') {
+    cotizacionTasa = parseFloat((totalImporte * 0.03).toFixed(6));
+  } else {
+    cotizacionTasa = parseFloat((totalImporte * 0.1).toFixed(6));
+  }
+
+  // Actualizar la planilla mensual
+  const planillaMensual = await this.planillaRepo.findOne({
+    where: { id_planilla_aportes: idPlanillaMensual }
+  });
+
+  if (planillaMensual) {
+    planillaMensual.total_importe = parseFloat(totalImporte.toFixed(6));
+    planillaMensual.total_trabaj = totalTrabajadores;
+    planillaMensual.cotizacion_tasa = cotizacionTasa;
+    
+    await this.planillaRepo.save(planillaMensual);
+    
+    console.log(`✅ Planilla mensual ${idPlanillaMensual} actualizada: Total Importe: ${totalImporte}, Total Trabajadores: ${totalTrabajadores}`);
+  }
+}
 
 // 1 .-  PROCESAR EXCEL DE APORTES -------------------------------------------------------------------------------------------------------
 procesarExcel(filePath: string) {
@@ -83,8 +131,25 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
 
   const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
 
-  if (tipo_planilla === 'Mensual') {
-    const existePlanillaMensual = await this.planillaRepo.findOne({
+  let planillaMensualExistente: PlanillasAporte | null = null;
+
+  if (tipo_planilla === 'Planilla Adicional') {
+    // Solo aceptamos adicionales si hay una mensual activa (estado = 1)
+    planillaMensualExistente = await this.planillaRepo.findOne({
+      where: {
+        cod_patronal,
+        fecha_planilla: fechaPlanilla,
+        tipo_planilla: 'Mensual',
+        estado: 1,
+      },
+    });
+
+    if (!planillaMensualExistente) {
+      throw new BadRequestException('Debe existir una planilla Mensual activa (estado = 1) antes de subir una Adicional.');
+    }
+  } else if (tipo_planilla === 'Mensual') {
+    // Validación para no duplicar planilla mensual (sin importar estado)
+    planillaMensualExistente = await this.planillaRepo.findOne({
       where: {
         cod_patronal,
         fecha_planilla: fechaPlanilla,
@@ -92,12 +157,11 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
       },
     });
 
-    if (existePlanillaMensual) {
+    if (planillaMensualExistente) {
       throw new BadRequestException('Ya existe una planilla Mensual para este mes y gestión.');
     }
   }
 
-  // Función segura para convertir montos
   const parseOrZero = (val: any): number => {
     if (val === null || val === undefined) return 0;
     if (typeof val === 'string') {
@@ -109,7 +173,6 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     return 0;
   };
 
-  // Calcular totalImporte
   let totalImporte = 0;
   data.forEach((row, index) => {
     const haberBasico = parseOrZero(row['Haber Básico']);
@@ -121,29 +184,17 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     const sumaFila = haberBasico + bonoAntiguedad + montoHorasExtra + montoHorasExtraNocturnas + otrosBonosPagos;
 
     if (isNaN(sumaFila)) {
-      console.error(`❌ NaN en fila ${index + 1}`, {
-        haberBasico,
-        bonoAntiguedad,
-        montoHorasExtra,
-        montoHorasExtraNocturnas,
-        otrosBonosPagos,
-      });
       throw new BadRequestException(`Error al calcular total en la fila ${index + 1}: valores no numéricos`);
     }
 
     totalImporte += sumaFila;
   });
 
-  console.log(`✅ totalImporte calculado: ${totalImporte.toFixed(6)}`);
-
-  // Calcular cotizacion_tasa
   let cotizacionTasa: number;
   if (tipoEmpresa === 'PA') {
-    cotizacionTasa = parseFloat((totalImporte * 0.03).toFixed(6)); // 3%
-  } else if (['AP', 'AV', 'VA'].includes(tipoEmpresa)) {
-    cotizacionTasa = parseFloat((totalImporte * 0.1).toFixed(6)); // 10%
+    cotizacionTasa = parseFloat((totalImporte * 0.03).toFixed(6));
   } else {
-    throw new BadRequestException(`Tipo de empresa no válido para cálculo de cotización: ${tipoEmpresa}`);
+    cotizacionTasa = parseFloat((totalImporte * 0.1).toFixed(6));
   }
 
   const totalTrabaj = data.length;
@@ -162,84 +213,88 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     usuario_creacion,
     nombre_creacion,
     cotizacion_tasa: cotizacionTasa,
+    id_planilla_origen: tipo_planilla === 'Planilla Adicional' ? planillaMensualExistente.id_planilla_aportes : null,
   });
 
   const planillaGuardada = await this.planillaRepo.save(nuevaPlanilla);
 
-  // Función para convertir fechas de Excel
   function parseExcelDate(value: any): string | undefined {
     if (!value) return undefined;
-
     if (typeof value === 'number' && !isNaN(value) && value > 0) {
-      try {
-        const date = new Date(1900, 0, value - 1);
-        if (isNaN(date.getTime())) throw new Error('Fecha inválida');
-        return date.toISOString();
-      } catch {
-        throw new BadRequestException(`Fecha inválida en el Excel: ${value}`);
-      }
+      const date = new Date(1900, 0, value - 1);
+      return date.toISOString();
     }
-
     if (typeof value === 'string') {
       const parsedDate = moment(value, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY'], true);
-      if (parsedDate.isValid()) {
-        return parsedDate.toISOString();
-      }
+      if (parsedDate.isValid()) return parsedDate.toISOString();
       throw new BadRequestException(`Formato de fecha no válido: ${value}`);
     }
-
     return undefined;
   }
 
+  let nroBase = 1;
+
+  if (tipo_planilla === 'Planilla Adicional') {
+    // Buscar el máximo número en TODAS las planillas relacionadas
+    const planillasRelacionadas = await this.planillaRepo.find({
+      where: [
+        { id_planilla_aportes: planillaMensualExistente.id_planilla_aportes }, // La mensual
+        { id_planilla_origen: planillaMensualExistente.id_planilla_aportes }   // Todas las adicionales
+      ]
+    });
+
+    const idsToCheck = planillasRelacionadas.map(p => p.id_planilla_aportes);
+
+    const maxNro = await this.detalleRepo
+      .createQueryBuilder('detalle')
+      .select('MAX(detalle.nro)', 'max')
+      .where('detalle.id_planilla_aportes IN (:...ids)', { ids: idsToCheck })
+      .getRawOne();
+
+    nroBase = (parseInt(maxNro?.max || '0', 10) || 0) + 1;
+  }
+
   const detalles: CreatePlanillaAportesDetallesDto[] = data.map((row, index) => {
-    try {
-      const redondear = (valor: any): number => parseFloat(parseOrZero(valor).toFixed(6));
+    const redondear = (valor: any): number => parseFloat(parseOrZero(valor).toFixed(6));
+    const haberBasico = redondear(row['Haber Básico']);
+    const bonoAntiguedad = redondear(row['Bono de antigüedad']);
+    const montoHorasExtra = redondear(row['Monto horas extra']);
+    const montoHorasExtraNocturnas = redondear(row['Monto horas extra nocturnas']);
+    const otrosBonosPagos = redondear(row['Otros bonos y pagos']);
 
-      const haberBasico = redondear(row['Haber Básico']);
-      const bonoAntiguedad = redondear(row['Bono de antigüedad']);
-      const montoHorasExtra = redondear(row['Monto horas extra']);
-      const montoHorasExtraNocturnas = redondear(row['Monto horas extra nocturnas']);
-      const otrosBonosPagos = redondear(row['Otros bonos y pagos']);
-
-      return {
-        id_planilla_aportes: planillaGuardada.id_planilla_aportes,
-        nro: row['Nro.'] || index + 1,
-        ci: row['Número documento de identidad']?.toString(),
-        apellido_paterno: row['Apellido Paterno']?.toString(),
-        apellido_materno: row['Apellido Materno']?.toString(),
-        nombres: row['Nombres']?.toString(),
-        sexo: row['Sexo (M/F)']?.toString(),
-        cargo: row['Cargo']?.toString(),
-        fecha_nac: parseExcelDate(row['Fecha de nacimiento']),
-        fecha_ingreso: parseExcelDate(row['Fecha de ingreso']),
-        fecha_retiro: parseExcelDate(row['Fecha de retiro']),
-        dias_pagados: parseInt(row['Días pagados'] || '0', 10) || null,
-        haber_basico: haberBasico,
-        bono_antiguedad: bonoAntiguedad,
-        monto_horas_extra: montoHorasExtra,
-        monto_horas_extra_nocturnas: montoHorasExtraNocturnas,
-        otros_bonos_pagos: otrosBonosPagos,
-        salario: parseFloat((haberBasico + bonoAntiguedad + montoHorasExtra + montoHorasExtraNocturnas + otrosBonosPagos).toFixed(6)),
-        regional: row['regional']?.toString(),
-      };
-    } catch (error) {
-      throw new BadRequestException(`Error en la fila ${row['Nro.'] || index + 1}: ${error.message}`);
-    }
+    return {
+      id_planilla_aportes: planillaGuardada.id_planilla_aportes,
+      nro: tipo_planilla === 'Mensual' ? index + 1 : nroBase + index,
+      ci: row['Número documento de identidad']?.toString(),
+      apellido_paterno: row['Apellido Paterno']?.toString(),
+      apellido_materno: row['Apellido Materno']?.toString(),
+      nombres: row['Nombres']?.toString(),
+      sexo: row['Sexo (M/F)']?.toString(),
+      cargo: row['Cargo']?.toString(),
+      fecha_nac: parseExcelDate(row['Fecha de nacimiento']),
+      fecha_ingreso: parseExcelDate(row['Fecha de ingreso']),
+      fecha_retiro: parseExcelDate(row['Fecha de retiro']),
+      dias_pagados: parseInt(row['Días pagados'] || '0', 10) || null,
+      haber_basico: haberBasico,
+      bono_antiguedad: bonoAntiguedad,
+      monto_horas_extra: montoHorasExtra,
+      monto_horas_extra_nocturnas: montoHorasExtraNocturnas,
+      otros_bonos_pagos: otrosBonosPagos,
+      salario: parseFloat((haberBasico + bonoAntiguedad + montoHorasExtra + montoHorasExtraNocturnas + otrosBonosPagos).toFixed(6)),
+      regional: row['regional']?.toString(),
+      tipo: tipo_planilla.toLowerCase().replace(' ', '_') as 'mensual' | 'planilla_adicional',
+    };
   });
 
   const batchSize = 1000;
-  const totalDetalles = detalles.length;
-  console.log(`Total de registros a guardar: ${totalDetalles}`);
-
-  for (let i = 0; i < totalDetalles; i += batchSize) {
+  for (let i = 0; i < detalles.length; i += batchSize) {
     const batch = detalles.slice(i, i + batchSize);
-    console.log(`Guardando lote ${i / batchSize + 1} (${batch.length} registros)`);
-    try {
-      await this.detalleRepo.save(batch, { chunk: 1000 });
-    } catch (error) {
-      console.error(`Error al guardar lote ${i / batchSize + 1}:`, error);
-      throw new BadRequestException(`Error al guardar lote ${i / batchSize + 1}: ${error.message}`);
-    }
+    await this.detalleRepo.save(batch, { chunk: 1000 });
+  }
+
+  // NUEVO: Si es una planilla adicional, actualizar los totales de la planilla mensual
+  if (tipo_planilla === 'Planilla Adicional' && planillaMensualExistente) {
+    await this.actualizarTotalesPlanillaMensual(planillaMensualExistente.id_planilla_aportes, tipoEmpresa);
   }
 
   return {
@@ -247,11 +302,8 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     id_planilla: planillaGuardada.id_planilla_aportes,
   };
 }
-
 // 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
-async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaDto?: CreatePlanillasAporteDto) {
-  
-
+async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanillaDto?: CreatePlanillasAporteDto) {
   const planilla = await this.planillaRepo.findOne({
     where: { id_planilla_aportes: id_planilla },
     relations: ['empresa'],
@@ -275,6 +327,30 @@ async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaD
     throw new BadRequestException('❌ No se encontraron registros válidos en el archivo.');
   }
 
+  let planillaMensualExistente: PlanillasAporte | null = null;
+  
+  if (planilla.tipo_planilla === 'Planilla Adicional') {
+    if (planilla.id_planilla_origen) {
+      planillaMensualExistente = await this.planillaRepo.findOne({
+        where: { id_planilla_aportes: planilla.id_planilla_origen }
+      });
+    } else {
+      const fechaPlanilla = new Date(`${planilla.gestion}-${planilla.mes.padStart(2, '0')}-01`);
+      planillaMensualExistente = await this.planillaRepo.findOne({
+        where: {
+          cod_patronal: planilla.cod_patronal,
+          fecha_planilla: fechaPlanilla,
+          tipo_planilla: 'Mensual',
+          estado: 1,
+        },
+      });
+    }
+
+    if (!planillaMensualExistente) {
+      throw new BadRequestException('No se encontró la planilla mensual correspondiente.');
+    }
+  }
+
   if (createPlanillaDto) {
     const { cod_patronal, gestion, mes, tipo_planilla } = createPlanillaDto;
 
@@ -283,28 +359,29 @@ async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaD
       throw new BadRequestException('No se encontró una empresa con el código patronal proporcionado');
     }
 
-    if (tipo_planilla === 'Mensual') {
-      const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
-
-      const existePlanillaMensual = await this.planillaRepo.findOne({
+    if (tipo_planilla === 'Planilla Adicional') {
+      planillaMensualExistente = await this.planillaRepo.findOne({
         where: {
           cod_patronal,
-          fecha_planilla: fechaPlanilla,
           tipo_planilla: 'Mensual',
-          id_planilla_aportes: Not(id_planilla),
+          estado: 1,
         },
       });
 
-      if (existePlanillaMensual) {
+      if (!planillaMensualExistente) {
+        throw new BadRequestException('Debe existir una planilla Mensual activa (estado = 1) antes de subir una Adicional.');
+      }
+    } else if (tipo_planilla === 'Mensual') {
+      planillaMensualExistente = await this.planillaRepo.findOne({
+        where: {
+          cod_patronal,
+          tipo_planilla: 'Mensual',
+        },
+      });
+
+      if (planillaMensualExistente && planillaMensualExistente.id_planilla_aportes !== id_planilla) {
         throw new BadRequestException('Ya existe una planilla Mensual para este mes y gestión.');
       }
-
-      planilla.cod_patronal = cod_patronal;
-      planilla.id_empresa = empresa.id_empresa;
-      planilla.fecha_planilla = fechaPlanilla;
-      planilla.mes = mes;
-      planilla.gestion = gestion;
-      planilla.tipo_planilla = tipo_planilla;
     }
   }
 
@@ -325,10 +402,36 @@ async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaD
     return undefined;
   }
 
+  let nroBase = 1;
+  const tipoPlanilla = createPlanillaDto?.tipo_planilla || planilla.tipo_planilla;
+  
+  if (tipoPlanilla === 'Planilla Adicional' && planillaMensualExistente) {
+    const planillasRelacionadas = await this.planillaRepo.find({
+      where: [
+        { id_planilla_aportes: planillaMensualExistente.id_planilla_aportes },
+        { id_planilla_origen: planillaMensualExistente.id_planilla_aportes }
+      ]
+    });
+
+    const idsToCheck = planillasRelacionadas
+      .filter(p => p.id_planilla_aportes !== id_planilla)
+      .map(p => p.id_planilla_aportes);
+
+    if (idsToCheck.length > 0) {
+      const maxNro = await this.detalleRepo
+        .createQueryBuilder('detalle')
+        .select('MAX(detalle.nro)', 'max')
+        .where('detalle.id_planilla_aportes IN (:...ids)', { ids: idsToCheck })
+        .getRawOne();
+
+      nroBase = (parseInt(maxNro?.max || '0', 10) || 0) + 1;
+    }
+  }
+
   let totalImporte = 0;
   const totalTrabaj = datosValidos.length;
 
-  const nuevosDetalles: CreatePlanillaAportesDetallesDto[] = datosValidos.map((row) => {
+  const nuevosDetalles: CreatePlanillaAportesDetallesDto[] = datosValidos.map((row, index) => {
     try {
       const haber_basico = parseFloat(row['Haber Básico'] || '0');
       const bono_antiguedad = parseFloat(row['Bono de antigüedad'] || '0');
@@ -342,7 +445,7 @@ async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaD
 
       return {
         id_planilla_aportes: id_planilla,
-        nro: row['Nro.'] || 0,
+        nro: tipoPlanilla === 'Mensual' ? index + 1 : nroBase + index,
         ci: row['Número documento de identidad'] || '',
         apellido_paterno: row['Apellido Paterno'] || '',
         apellido_materno: row['Apellido Materno'] || '',
@@ -360,9 +463,10 @@ async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaD
         otros_bonos_pagos: otros_bonos,
         salario,
         regional: row['regional'] || '',
+        tipo: planilla.tipo_planilla.toLowerCase().replace(' ', '_') as 'mensual' | 'planilla_adicional',
       };
     } catch (error) {
-      throw new BadRequestException(`Error en la fila ${row['Nro.']}: ${error.message}`);
+      throw new BadRequestException(`Error en la fila ${row['Nro.'] || index + 1}: ${error.message}`);
     }
   });
 
@@ -371,7 +475,6 @@ async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaD
   const batchSize = 1000;
   const totalnuevosDetalles = nuevosDetalles.length;
   console.log(`Total de registros a guardar: ${totalnuevosDetalles}`);
-  
 
   for (let i = 0; i < totalnuevosDetalles; i += batchSize) {
     const batch = nuevosDetalles.slice(i, i + batchSize);
@@ -384,9 +487,15 @@ async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaD
     }
   }
 
+  // Actualizar la planilla actual
   planilla.total_importe = parseFloat(totalImporte.toFixed(6));
   planilla.total_trabaj = totalTrabaj;
   await this.planillaRepo.save(planilla);
+
+  // NUEVO: Si es una planilla adicional, actualizar también la planilla mensual
+  if (tipoPlanilla === 'Planilla Adicional' && planillaMensualExistente) {
+    await this.actualizarTotalesPlanillaMensual(planillaMensualExistente.id_planilla_aportes, planilla.empresa.tipo?.toUpperCase());
+  }
 
   return {
     mensaje: '✅ Detalles de la planilla actualizados con éxito',
@@ -395,7 +504,6 @@ async actualizarDetallesPlanilla(id_planilla: number,data: any[],createPlanillaD
     total_trabajadores: totalTrabaj,
   };
 }
-
 // 4 .- OBTENER HISTORIAL DETALLADO PAGINACION Y BUSQUEDA DE TABLA PLANILLAS DE APORTES -------------------------------------------------------------------------------------------------------
 async obtenerHistorial(cod_patronal: string,pagina: number = 1,limite: number = 10,busqueda: string = '', mes?: string, anio?: string) {
   try {
@@ -836,6 +944,7 @@ async obtenerPlanilla(id_planilla: number) {
       total_aportes_min_salud: planilla.total_aportes_min_salud,
       nombre_creacion: planilla.nombre_creacion,
       cotizacion_tasa: planilla.cotizacion_tasa,
+      tipo_planilla: planilla.tipo_planilla,
     };
 
     return { mensaje: 'Planilla obtenida con éxito', planilla: mappedPlanilla };
@@ -866,8 +975,27 @@ async obtenerDetalles(id_planilla: number, pagina: number = 1, limite: number = 
   try {
     const skip = limite > 0 ? (pagina - 1) * limite : 0;
 
+    // Crear query builder
     const query = this.detalleRepo.createQueryBuilder('detalle')
-      .where('detalle.id_planilla_aportes = :id_planilla', { id_planilla })
+      .innerJoin('detalle.planilla_aporte', 'planilla')
+      .where(
+        '(detalle.id_planilla_aportes = :id_planilla OR planilla.id_planilla_origen = :id_planilla)',
+        { id_planilla }
+      );
+
+    // Añadir condiciones de búsqueda si existe
+    if (busqueda && busqueda.trim() !== '') {
+      query.andWhere(new Brackets(qb => {
+        qb.where('detalle.ci ILIKE :busqueda', { busqueda: `%${busqueda}%` })
+          .orWhere('detalle.apellido_paterno ILIKE :busqueda', { busqueda: `%${busqueda}%` })
+          .orWhere('detalle.apellido_materno ILIKE :busqueda', { busqueda: `%${busqueda}%` })
+          .orWhere('detalle.nombres ILIKE :busqueda', { busqueda: `%${busqueda}%` })
+          .orWhere('detalle.cargo ILIKE :busqueda', { busqueda: `%${busqueda}%` });
+      }));
+    }
+
+    // Selección de campos y ordenamiento
+    query
       .orderBy('detalle.nro', 'ASC')
       .select([
         'detalle.id_planilla_aportes_detalles',
@@ -889,26 +1017,22 @@ async obtenerDetalles(id_planilla: number, pagina: number = 1, limite: number = 
         'detalle.es_afiliado',
         'detalle.matricula',
         'detalle.tipo_afiliado',
+        'detalle.tipo',
       ]);
 
-    if (limite > 0) { // Solo aplicar paginación si limite es positivo
+    // Paginación
+    if (limite > 0) {
       query.skip(skip).take(limite);
     }
 
-    if (busqueda) {
-      query.andWhere(
-        '(detalle.ci LIKE :busqueda OR detalle.apellido_paterno LIKE :busqueda OR detalle.apellido_materno LIKE :busqueda OR detalle.nombres LIKE :busqueda OR detalle.cargo LIKE :busqueda)',
-        { busqueda: `%${busqueda}%` }
-      );
-    }
-
+    // Ejecutar consulta
     const [detalles, total] = await query.getManyAndCount();
 
     if (!detalles.length) {
-      return { 
-        mensaje: 'No hay detalles registrados para esta planilla', 
-        detalles: [], 
-        total: 0 
+      return {
+        mensaje: 'No hay detalles registrados para esta planilla',
+        detalles: [],
+        total: 0,
       };
     }
 
@@ -918,12 +1042,14 @@ async obtenerDetalles(id_planilla: number, pagina: number = 1, limite: number = 
       trabajadores: detalles,
       total,
       pagina,
-      limite
+      limite,
     };
   } catch (error) {
+    console.error('Error en obtenerDetalles:', error);
     throw new Error('Error al obtener los detalles de la planilla');
   }
 }
+
 // 9.- OBSERVAR DETALLES DE PLANILLA DE APORTES POR REGIONAL -------------------------------------------------------------------------------------------------------
 async obtenerDetallesPorRegional(id_planilla: number, regional: string) {
   const detalles = await this.detalleRepo.find({
@@ -1238,7 +1364,7 @@ async corregirPlanilla(id_planilla: number, data: any) {
 
   return { mensaje: 'Planilla corregida y reenviada para validación', total_importe: totalImporteCalculado };
 }
-// 16.- (METODO AYUDA) OBTENER DETALLES DE PLANILLA POR MES Y GESTION -------------------------------------------------------------------------------------------------------
+// 16.-  OBTENER DETALLES DE PLANILLA POR MES Y GESTION -------------------------------------------------------------------------------------------------------
 async obtenerDetallesDeMes(cod_patronal: string, mes: string, gestion: string) {
   const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
   const planilla = await this.planillaRepo.findOne({
@@ -1398,7 +1524,7 @@ async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: stri
     mensaje: 'Comparación de planillas completada con bajas agrupadas.',
   };
 }
-// 18.-  Método para generar el reporte de bajas con Carbone -------------------------------------------------------------------------------------------------------
+//* 18.-  Método para generar el reporte de bajas con Carbone -------------------------------------------------------------------------------------------------------
 async generarReporteBajas(id_planilla: number,cod_patronal: string): Promise<StreamableFile> {
   try {
     // Obtener la información de la planilla
@@ -2406,7 +2532,7 @@ async generarReporteHistorial(mes?: number, gestion?: number): Promise<Streamabl
   }
 }
 
-// 28 .- METODO CRUCE CON AFILIACIONES
+// 28 .- CRUCE CON AFILIACIONES
 async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string; detallesActualizados: number }> {
   try {
     // Validar parámetro
@@ -2431,49 +2557,68 @@ async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string
     }
 
     // Iterar sobre cada detalle
-    for (const detalle of detalles) {
-      try {
-        // Consultar el servicio externo con el CI
-        const response = await this.externalApiService.getAseguradoByCi(detalle.ci);
+for (const detalle of detalles) {
+  try {
+    // Extraer el número base del CI (antes del guion) para enviarlo a la API
+    const ciBase = detalle.ci.split('-')[0].trim(); // Esto asegura que mandas solo el número
 
-        // Verificar si la respuesta contiene datos válidos
-        if (response.status && response.data) {
-          const estadoAsegurado = response.data.ASE_ESTADO;
-          // Actualizar es_afiliado: true si es 'VIGENTE', false en cualquier otro caso
-          detalle.es_afiliado = estadoAsegurado === 'VIGENTE';
+    // Llamar al servicio con solo el número
+    const response = await this.externalApiService.getAseguradoByCi(ciBase);
 
-          // Actualizar matrícula y tipo_afiliado si está afiliado
-          if (detalle.es_afiliado) {
-            detalle.matricula = response.data.ASE_MAT || null;
-            detalle.tipo_afiliado = response.data.ASE_COND_EST || null;
-            console.log(`CI ${detalle.ci}: Afiliado, matrícula=${detalle.matricula}, tipo_afiliado=${detalle.tipo_afiliado}`);
-          } else {
-            detalle.matricula = null;
-            detalle.tipo_afiliado = null;
-            console.log(`CI ${detalle.ci}: No afiliado, matrícula y tipo_afiliado establecidos a null`);
-          }
+    if (response.status && response.data) {
+      const data = response.data;
+
+      const ciApi = (data.ASE_CI || '').trim();
+      const complementoApi = (data.ASE_CI_COM || '').trim().toUpperCase();
+      const ciApiCompleto = complementoApi ? `${ciApi}-${complementoApi}` : ciApi;
+
+      const ciDetalle = detalle.ci.trim().toUpperCase();
+
+      console.log(`CI de detalle: ${ciDetalle}`);
+      console.log(`CI de API: ${ciApiCompleto}`);
+
+      const coinciden = ciApiCompleto === ciDetalle;
+
+      if (coinciden) {
+        detalle.es_afiliado = data.ASE_ESTADO === 'VIGENTE';
+        if (detalle.es_afiliado) {
+          detalle.matricula = data.ASE_MAT || null;
+          detalle.tipo_afiliado = data.ASE_COND_EST || null;
+          console.log(`✔️ Coincide. CI ${ciDetalle} está afiliado. Matrícula: ${detalle.matricula}`);
         } else {
-          // Si no se encuentra el asegurado, marcar como no afiliado
-          detalle.es_afiliado = false;
           detalle.matricula = null;
           detalle.tipo_afiliado = null;
-          console.log(`CI ${detalle.ci}: No encontrado en la API, matrícula y tipo_afiliado establecidos a null`);
+          console.log(`✔️ Coincide. CI ${ciDetalle} no está afiliado.`);
         }
-
-        // Guardar el detalle actualizado
-        await this.detalleRepo.save(detalle);
-        detallesActualizados++;
-      } catch (error) {
-        // En caso de error en la consulta (por ejemplo, servicio no disponible), marcar como no afiliado
-        console.error(`Error al consultar CI ${detalle.ci}: ${error.message}`);
+      } else {
+        // No coincide, marcar como no afiliado
         detalle.es_afiliado = false;
         detalle.matricula = null;
         detalle.tipo_afiliado = null;
-        console.log(`CI ${detalle.ci}: Error en consulta, matrícula y tipo_afiliado establecidos a null`);
-        await this.detalleRepo.save(detalle);
-        detallesActualizados++;
+        console.log(`❌ No coincide. CI Detalle: ${ciDetalle} | CI API: ${ciApiCompleto}`);
       }
+
+    } else {
+      detalle.es_afiliado = false;
+      detalle.matricula = null;
+      detalle.tipo_afiliado = null;
+      console.log(`⚠️ No se encontró CI ${detalle.ci} en la API`);
     }
+
+    await this.detalleRepo.save(detalle);
+    detallesActualizados++;
+
+  } catch (error) {
+    console.error(`❌ Error al consultar CI ${detalle.ci}: ${error.message}`);
+    detalle.es_afiliado = false;
+    detalle.matricula = null;
+    detalle.tipo_afiliado = null;
+    await this.detalleRepo.save(detalle);
+    detallesActualizados++;
+  }
+}
+
+
 
     return {
       mensaje: `Verificación completada. Se actualizaron ${detallesActualizados} detalles.`,
@@ -2727,5 +2872,49 @@ async generarReporteDetallesExcel(idPlanilla: number): Promise<StreamableFile> {
     throw new BadRequestException(`Error al generar el reporte de detalles: ${error.message}`);
   }
 }
+
+// 34.- 
+async obtenerResumenConAdicionales(idPlanillaMensual: number) {
+  const planillaMensual = await this.planillaRepo.findOne({
+    where: { id_planilla_aportes: idPlanillaMensual },
+    relations: ['planillasAdicionales'],
+  });
+
+  if (!planillaMensual) {
+    throw new NotFoundException('No se encontró la planilla mensual');
+  }
+
+  const totalMensual = parseFloat(planillaMensual.total_importe as any || '0');
+  const trabajadoresMensual = planillaMensual.total_trabaj || 0;
+
+  const totalAdicionales = planillaMensual.planillasAdicionales.reduce(
+    (acc, p) => acc + parseFloat(p.total_importe as any || '0'),
+    0,
+  );
+
+  const totalTrabajadoresAdicionales = planillaMensual.planillasAdicionales.reduce(
+    (acc, p) => acc + (p.total_trabaj || 0),
+    0,
+  );
+
+  const totalFinal = totalMensual + totalAdicionales;
+  const totalTrabajadores = trabajadoresMensual + totalTrabajadoresAdicionales;
+
+  return {
+    id: planillaMensual.id_planilla_aportes,
+    total_mensual: totalMensual,
+    trabajadores_mensual: trabajadoresMensual,
+    adicionales: planillaMensual.planillasAdicionales.map((p) => ({
+      id: p.id_planilla_aportes,
+      total: parseFloat(p.total_importe as any || '0'),
+      trabajadores: p.total_trabaj || 0,
+    })),
+    total_combinado: totalFinal,
+    trabajadores_combinado: totalTrabajadores,
+  };
+}
+
+
+
 
 }

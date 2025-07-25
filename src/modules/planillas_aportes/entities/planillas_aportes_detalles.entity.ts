@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { PlanillasAporte } from './planillas_aporte.entity';
 
 @Entity({ schema: 'transversales', name: 'planilla_aportes_detalles' })
 export class PlanillaAportesDetalles {
@@ -70,6 +71,15 @@ export class PlanillaAportesDetalles {
 
   @Column()
   tipo_afiliado: string;
+
+  @Column({ type: 'varchar', nullable: false, default: 'mensual' })
+  tipo: 'Mensual' | 'Planilla Adicional' | 'Planilla Retroactivo';
+
+  @ManyToOne(() => PlanillasAporte, planilla => planilla.detalles)
+  @JoinColumn({ name: 'id_planilla_aportes' })
+  planilla_aporte: PlanillasAporte;
+
+
 
   
 

@@ -215,7 +215,7 @@ export class PlanillasAportesController {
   // 6.- OBTENER HISTORIAL PLANILLA DE APORTES-------------------------------------------
 
   @Get('historial-completo')
-  @ApiOperation({ summary: 'Obtener el historial completo de planillas de aportes (sin filtro de estado)' })
+  @ApiOperation({ summary: '(6) Obtener el historial completo de planillas de aportes (sin filtro de estado)' })
   @ApiQuery({ name: 'pagina', required: false, description: 'Número de página', type: Number })
   @ApiQuery({ name: 'limite', required: false, description: 'Límite de registros por página', type: Number })
   @ApiQuery({ name: 'busqueda', required: false, description: 'Término de búsqueda', type: String })
@@ -246,7 +246,7 @@ export class PlanillasAportesController {
 
   // 7 .- OBTENER PLANILLA DE APORTES (ASINCRONO SIN PAGINACION) -----------------------------------------------------
   @Get(':id_planilla')
-  @ApiOperation({ summary: 'Obtener una planilla de aportes por su ID' })
+  @ApiOperation({ summary: '(7) Obtener una planilla de aportes por su ID' })
   @ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
   @ApiResponse({ status: 200, description: 'Planilla obtenida con éxito' })
   @ApiResponse({ status: 400, description: 'La planilla no existe o parámetros inválidos' })
@@ -268,6 +268,7 @@ export class PlanillasAportesController {
   // 8.- OBTENER DETALLES DE PLANILLA DE APORTES POR ID DE PLANILLA (TIENE PAGINACION Y BUSQUEDA)-------------
 
   @Get('detalles/:id_planilla')
+  @ApiOperation({ summary: '(8) Obtener detalles de la planilla' })
   @ApiQuery({
     name: 'busqueda',
     required: false,
@@ -854,6 +855,30 @@ async generarReporteDetallesExcel(
     });
   }
 }
+
+
+// 34 .- 
+
+@Get('resumen/:id_planilla')
+@ApiOperation({ summary: 'Obtener resumen de planilla mensual con adicionales' })
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla mensual', type: Number })
+@ApiResponse({ status: 200, description: 'Resumen obtenido con éxito' })
+@ApiResponse({ status: 404, description: 'No se encontró la planilla mensual' })
+@ApiResponse({ status: 500, description: 'Error del servidor' })
+async obtenerResumenPlanillaMensual(@Param('id_planilla') id_planilla: number) {
+  try {
+    return await this.planillasAportesService.obtenerResumenConAdicionales(id_planilla);
+  } catch (error) {
+    throw new HttpException(
+      {
+        status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message || 'Error al obtener el resumen de la planilla',
+      },
+      error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+}
+
 
 
 
