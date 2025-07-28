@@ -2053,15 +2053,14 @@ async calcularAportes(idPlanilla: number): Promise<any> {
 // 24 .- calcular aportes con fecha pago -------------------------------------------------------------------------------------------------------
 async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): Promise<any> {
   try {
-    // Validar parámetros
     if (!idPlanilla || idPlanilla < 1) {
       throw new BadRequestException('El ID de la planilla debe ser un número positivo');
     }
+
     if (!fechaPagoPropuesta || isNaN(fechaPagoPropuesta.getTime())) {
       throw new BadRequestException('La fecha de pago propuesta debe ser una fecha válida');
     }
 
-    // 1. Obtener la planilla con la relación empresa
     const planilla = await this.planillaRepo.findOne({
       where: { id_planilla_aportes: idPlanilla },
       relations: ['empresa'],
@@ -2071,15 +2070,10 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
       throw new BadRequestException('Planilla no encontrada');
     }
 
-    // 2. Validar fechas requeridas
-    if (!planilla.fecha_declarada) {
-      throw new BadRequestException('fecha_declarada debe estar definida para calcular los aportes');
-    }
-    if (!planilla.fecha_planilla) {
-      throw new BadRequestException('fecha_planilla debe estar definida para calcular los aportes');
+    if (!planilla.fecha_declarada || !planilla.fecha_planilla) {
+      throw new BadRequestException('Faltan fechas requeridas para calcular los aportes');
     }
 
-    // 3. Ajustar fechas a la zona horaria de Bolivia 
     const adjustToBoliviaTime = (date: Date): Date => {
       return moment(date).tz('America/La_Paz').toDate();
     };
@@ -2088,128 +2082,144 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
     const fechaDeclaradaBolivia = adjustToBoliviaTime(new Date(planilla.fecha_declarada));
     const fechaPagoBolivia = adjustToBoliviaTime(new Date(fechaPagoPropuesta));
 
-    // 4. Calcular la fecha límite (último día del mes SIGUIENTE a fecha_planilla)
-    const getFechaLimite = (fechaPlanilla: Date): Date => {
-      const baseDate = new Date(fechaPlanilla);
-      baseDate.setUTCHours(0, 0, 0, 0);
-      baseDate.setUTCMonth(baseDate.getUTCMonth() + 2, 0); 
-      return adjustToBoliviaTime(baseDate);
+    // ✅ FECHA DE PRESENTACIÓN OFICIAL: Primer día del tercer mes desde fecha_planilla
+    const getFechaPresentacionOficial = (fechaPlanilla: Date): Date => {
+      return moment(fechaPlanilla)
+        .tz('America/La_Paz')
+        .add(3, 'months') // Recorre 2 meses
+        .startOf('month') // Primer día de ese mes
+        .toDate();
     };
 
-    const fechaLimite = getFechaLimite(fechaPlanillaBolivia);
+    const fechaPresentacionOficial = getFechaPresentacionOficial(fechaPlanillaBolivia);
 
-    // 5. Calcular Aporte según el tipo de empresa
-    let aportePorcentaje: number;
     const tipoEmpresa = planilla.empresa?.tipo;
     if (!tipoEmpresa) {
       throw new BadRequestException('No se pudo determinar el tipo de empresa');
     }
+
     const tipo = tipoEmpresa.toUpperCase();
+    let aportePorcentaje: number;
     let tasaPorcentaje: number;
 
+    const totalImporte = Number(planilla.total_importe) || 0;
+
     if (tipo === 'PA') {
-      aportePorcentaje = (planilla.total_importe || 0) * 0.03;
+      aportePorcentaje = totalImporte * 0.03;
       tasaPorcentaje = 0.03;
     } else if (['AP', 'AV', 'VA'].includes(tipo)) {
-      aportePorcentaje = (planilla.total_importe || 0) * 0.1;
+      aportePorcentaje = totalImporte * 0.1;
       tasaPorcentaje = 0.1;
     } else {
       throw new BadRequestException(`Tipo de empresa no válido: ${tipoEmpresa}`);
     }
 
-    // 6. Obtener UFV Día Formal
-    const fechaDeclaradaForUfv = new Date(fechaDeclaradaBolivia);
-    fechaDeclaradaForUfv.setHours(0, 0, 0, 0);
-    const ufvDiaFormal = await this.getUfvForDate(fechaDeclaradaForUfv);
+    // ✅ UFV día formal (fecha presentación oficial)
+    const fechaFormal = new Date(fechaPresentacionOficial);
+    fechaFormal.setHours(0, 0, 0, 0);
+    const ufvDiaFormal = await this.getUfvForDate(fechaFormal);
 
-    // 7. Obtener UFV Día Presentación (fecha pago - 1 día)
-    const fechaPagoForUfv = new Date(fechaPagoBolivia);
-    fechaPagoForUfv.setDate(fechaPagoForUfv.getDate() - 1);
-    fechaPagoForUfv.setHours(0, 0, 0, 0);
-    const ufvDiaPresentacion = await this.getUfvForDate(fechaPagoForUfv);
+    // ✅ UFV día presentación (fechaPago - 1)
+    const fechaPagoUfv = new Date(fechaPagoBolivia);
+    fechaPagoUfv.setDate(fechaPagoUfv.getDate() - 1);
+    fechaPagoUfv.setHours(0, 0, 0, 0);
+    const ufvDiaPresentacion = await this.getUfvForDate(fechaPagoUfv);
 
-    // 8. Calcular Aporte Actualizado
+    // ✅ Aporte actualizado
     const calculoAporteActualizado = (aportePorcentaje / ufvDiaFormal) * ufvDiaPresentacion;
-    const aporteActualizado = calculoAporteActualizado < aportePorcentaje ? aportePorcentaje : calculoAporteActualizado;
+    const aporteActualizado = Math.max(aportePorcentaje, calculoAporteActualizado);
 
-    // 9. Monto actualizado
+    // ✅ Monto actualizado
     const montoActualizado = Math.max(0, aporteActualizado - aportePorcentaje);
 
-    // 10. Multa por no presentación
-    const aplicaMultaNoPresentacion = fechaDeclaradaBolivia > fechaLimite;
-    const multaNoPresentacion = aplicaMultaNoPresentacion ? aportePorcentaje * 0.01 : 0;
+    // ✅ Multa por no presentación (fijo 1%)
+    let multaNoPresentacion = aportePorcentaje * 0.01;
+    console.log('Multa por no presentación inicial:', multaNoPresentacion);
+    console.log('Fecha declarada (Bolivia):', fechaDeclaradaBolivia);
+    console.log('Fecha planilla (Bolivia):', fechaPlanillaBolivia);
 
-    // 11. Días de retraso
-    const normalizeToStartOfDay = (date: Date): Date => {
-      const normalized = new Date(date);
-      normalized.setHours(0, 0, 0, 0);
-      return normalized;
+    // Calcular el último día del mes siguiente a la fecha de planilla
+    const fechaPlanilla = new Date(fechaPlanillaBolivia);
+    const ultimoDiaMesSiguiente = new Date(fechaPlanilla.getFullYear(), fechaPlanilla.getMonth() + 2, 0);
+    console.log('Último día del mes siguiente:', ultimoDiaMesSiguiente);
+
+    // Si la fecha declarada está dentro del plazo (hasta el último día del mes siguiente), no hay multa
+    if (new Date(fechaDeclaradaBolivia) <= ultimoDiaMesSiguiente) {
+      multaNoPresentacion = 0;
+      console.log('No se aplica multa por no presentación, fecha declarada dentro del plazo oficial');
+    }
+    
+    
+
+    // ✅ Días de retraso
+    const normalize = (d: Date) => {
+      const copy = new Date(d);
+      copy.setHours(0, 0, 0, 0);
+      return copy;
     };
 
-    const fechaPagoNormalized = normalizeToStartOfDay(fechaPagoBolivia);
-    const fechaLimiteNormalized = normalizeToStartOfDay(fechaLimite);
+    const diasRetraso = Math.max(
+      0,
+      Math.floor((normalize(fechaPagoBolivia).getTime() - normalize(fechaPresentacionOficial).getTime()) / (1000 * 60 * 60 * 24))
+    );
 
-    const diasRetraso = Math.max(0, Math.floor((fechaPagoNormalized.getTime() - fechaLimiteNormalized.getTime()) / (1000 * 60 * 60 * 24)));
-
-    // 12. Intereses y multa sobre intereses
+    // ✅ Intereses y multa sobre intereses
     const intereses = (aporteActualizado * 0.0999 / 360) * diasRetraso;
     const multaSobreIntereses = intereses * 0.1;
 
-    // 13. Total a cancelar parcial
-    const totalACancelarParcial = aportePorcentaje + montoActualizado + multaNoPresentacion + intereses + multaSobreIntereses;
+    // ✅ Total a cancelar parcial
+    const totalACancelarParcial =
+      aportePorcentaje + montoActualizado + multaNoPresentacion + intereses + multaSobreIntereses;
 
-    // 14. Multas e intereses
-    const totalMultas = multaNoPresentacion + multaSobreIntereses;
-    const totalTasaInteres = intereses;
-
-    // 15. 5 Bs solo para AV
-    let formds08 = tipo === 'AV' ? 5 : 0;
-
-    // 16. Deducciones
+    // ✅ Deducciones
     let totalDeducciones = 0;
     let descuentoMinSalud = 0;
-    const aplicaMinSalud = planilla.aplica_descuento_min_salud;
 
-    if (aplicaMinSalud) {
+    if (planilla.aplica_descuento_min_salud) {
       descuentoMinSalud = aportePorcentaje * 0.05;
       totalDeducciones += descuentoMinSalud;
     }
 
-    const otrosDescuentos = planilla.otros_descuentos || 0;
+    const otrosDescuentos = Number(planilla.otros_descuentos || 0);
     totalDeducciones += otrosDescuentos;
 
-    // 17. Total final a cancelar con deducciones
-    const totalACancelar = totalACancelarParcial + formds08 - totalDeducciones;
+    // ✅ Total final a cancelar
+    const totalACancelar = totalACancelarParcial - totalDeducciones;
 
-    // 18. Devolver todos los valores
+    const recargos_ley = montoActualizado + multaNoPresentacion + multaSobreIntereses + intereses;
+
     return {
-      total_importe: planilla.total_importe || 0,
+      total_importe: totalImporte,
       aporte_porcentaje: aportePorcentaje,
+      cotizacion_tasa: tasaPorcentaje,
       ufv_dia_formal: ufvDiaFormal,
       ufv_dia_presentacion: ufvDiaPresentacion,
-      fecha_declarada: planilla.fecha_declarada,
-      fecha_pago: fechaPagoPropuesta,
       aporte_actualizado: aporteActualizado,
       monto_actualizado: montoActualizado,
       multa_no_presentacion: multaNoPresentacion,
+      fechaFormal,
+      fechaPagoUfv,
+      fecha_declarada: planilla.fecha_declarada,
+      fecha_pago: fechaPagoPropuesta,
+      fecha_presentacion_oficial: fechaPresentacionOficial,
       dias_retraso: diasRetraso,
       intereses,
       multa_sobre_intereses: multaSobreIntereses,
       total_a_cancelar_parcial: totalACancelarParcial,
-      total_multas: totalMultas,
-      total_tasa_interes: totalTasaInteres,
-      formds08,
+      total_multas: recargos_ley,
+      total_tasa_interes: intereses,
       total_deducciones: totalDeducciones,
       descuento_min_salud: descuentoMinSalud,
       otros_descuentos: otrosDescuentos,
       total_a_cancelar: totalACancelar,
-      tasa_porcentaje: tasaPorcentaje,
       tipo_empresa: tipo,
     };
   } catch (error) {
     throw new BadRequestException(`Error al calcular los aportes preliminares: ${error.message}`);
   }
 }
+
+
 
 //* 25 .- REPORTE FORMULARIO DS-08 (NOMBRE EN FRONT : FORMULARIO DS-08)
 async generarReporteAportes(idPlanilla: number): Promise<StreamableFile> {
