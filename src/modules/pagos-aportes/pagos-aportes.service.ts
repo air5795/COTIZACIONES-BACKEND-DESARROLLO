@@ -41,15 +41,23 @@ export class PagosAportesService {
       const idPlanilla = pagoData.id_planilla_aportes;
       if (idPlanilla) {
         const fechaPago = pagoData.fecha_pago ? new Date(pagoData.fecha_pago) : new Date();
-        await this.planillasAportesService.actualizarFechaPago(idPlanilla, fechaPago);
-        // Recalcular los aportes con la fecha_pago real
-        await this.planillasAportesService.calcularAportes(idPlanilla);
+        
+        // CAMBIO IMPORTANTE: Obtener los datos de la preliquidación
+        const datosLiquidacion = await this.planillasAportesService.calcularAportesPreliminar(
+          idPlanilla, 
+          fechaPago
+        );
+
+        // Actualizar TODOS los campos calculados en la planilla
+        await this.planillasAportesService.actualizarPlanillaConLiquidacion(
+          idPlanilla, 
+          fechaPago, 
+          datosLiquidacion
+        );
 
         // Verificar si hubo excedente
-        const planillaActualizada = await this.planillasAportesService.getPlanillaCompleta(idPlanilla);
-
         const montoPagado = Number(pagoData.monto_pagado || 0);
-        const totalCancelar = Number(planillaActualizada.total_a_cancelar || 0);
+        const totalCancelar = Number(datosLiquidacion.total_a_cancelar || 0);
 
         if (montoPagado > totalCancelar) {
           const excedente = montoPagado - totalCancelar;
@@ -77,6 +85,7 @@ export class PagosAportesService {
       await queryRunner.release();
     }
   }
+  
   // 2.- LISTAR TODOS LOS PAGOS
   async findAll() {
     try {

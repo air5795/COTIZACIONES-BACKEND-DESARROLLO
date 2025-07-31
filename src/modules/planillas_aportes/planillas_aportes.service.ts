@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, StreamableFile, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Not, Repository } from 'typeorm';
+import { Brackets, In, Not, Repository } from 'typeorm';
 import { PlanillasAporte } from './entities/planillas_aporte.entity';
 import { PlanillaAportesDetalles } from './entities/planillas_aportes_detalles.entity';
 import { HttpService } from '@nestjs/axios';
@@ -1125,16 +1125,42 @@ async actualizarEstadoAPendiente(id_planilla: number, fecha_declarada?: string) 
     ? moment(fecha_declarada).tz('America/La_Paz').toDate()
     : moment().tz('America/La_Paz').toDate();
 
-  // Verificar si la empresa es de tipo 'AP' y actualizar fecha_pago
+  // CAMBIO: Para empresas públicas (AP), hacer preliquidación automática
   if (planilla.empresa?.tipo === 'AP' && planilla.fecha_planilla) {
     const fechaPlanilla = new Date(planilla.fecha_planilla);
-    // Calcular el primer día del mes siguiente
+    
+    // Calcular el primer día del mes siguiente como fecha de pago tentativa
     const primerDiaMesSiguiente = new Date(
       fechaPlanilla.getFullYear(),
       fechaPlanilla.getMonth() + 1,
       1
     );
+    
     planilla.fecha_pago = primerDiaMesSiguiente;
+    
+    // NUEVO: Calcular y guardar la preliquidación automáticamente
+    try {
+      const datosLiquidacion = await this.calcularAportesPreliminar(
+        id_planilla, 
+        primerDiaMesSiguiente
+      );
+      
+      // Guardar todos los datos de la liquidación
+      await this.actualizarPlanillaConLiquidacion(
+        id_planilla,
+        primerDiaMesSiguiente,
+        datosLiquidacion
+      );
+      
+      // Agregar una nota indicando que es una liquidación preliminar
+      planilla.observaciones = (planilla.observaciones || '') + 
+        '\n[LIQUIDACIÓN PRELIMINAR - Empresa Pública] Fecha de pago tentativa. Actualizar cuando se confirme el pago real.';
+      
+      console.log(`Liquidación preliminar calculada para empresa pública ${planilla.empresa.emp_nom}`);
+    } catch (error) {
+      console.error('Error al calcular liquidación preliminar:', error);
+      // No lanzar error, permitir que continúe el proceso
+    }
   }
 
   // Guardar los cambios en la planilla
@@ -1152,9 +1178,13 @@ async actualizarEstadoAPendiente(id_planilla: number, fecha_declarada?: string) 
     id_recurso: planilla.id_planilla_aportes,
     tipo_recurso: 'PLANILLA_APORTES',
   };
+  
   await this.notificacionesService.crearNotificacion(notificacionDto);
 
-  return { mensaje: 'Estado de la planilla actualizado a Presentado correctamente' };
+  return { 
+    mensaje: 'Estado de la planilla actualizado a Presentado correctamente',
+    liquidacion_preliminar: planilla.empresa?.tipo === 'AP' ? true : false
+  };
 }
 
 // 12 .- ACTUALIZAR METODO PARA APROBAR U OBSERVAR LA PLANILLA (ESTADO 2 o 3)- #con notificaciones# -------------------------------------------------------------------------------------------------------
@@ -1367,18 +1397,47 @@ async corregirPlanilla(id_planilla: number, data: any) {
 // 16.-  OBTENER DETALLES DE PLANILLA POR MES Y GESTION -------------------------------------------------------------------------------------------------------
 async obtenerDetallesDeMes(cod_patronal: string, mes: string, gestion: string) {
   const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
-  const planilla = await this.planillaRepo.findOne({
-    where: { cod_patronal, fecha_planilla: fechaPlanilla },
+  
+  // 1. Buscar la planilla mensual
+  const planillaMensual = await this.planillaRepo.findOne({
+    where: { 
+      cod_patronal, 
+      fecha_planilla: fechaPlanilla,
+      tipo_planilla: 'Mensual'
+    },
   });
 
-  if (!planilla) {
-    throw new BadRequestException('No existe planilla para el mes y gestión solicitados.');
+  if (!planillaMensual) {
+    throw new BadRequestException('No existe planilla mensual para el mes y gestión solicitados.');
   }
 
+  // 2. Buscar todas las planillas adicionales relacionadas
+  const planillasAdicionales = await this.planillaRepo.find({
+    where: { 
+      id_planilla_origen: planillaMensual.id_planilla_aportes 
+    },
+  });
+
+  // 3. Obtener IDs de todas las planillas (mensual + adicionales)
+  const idsToCheck = [
+    planillaMensual.id_planilla_aportes,
+    ...planillasAdicionales.map(p => p.id_planilla_aportes)
+  ];
+
+  console.log(`📋 Obteniendo detalles para ${cod_patronal} - ${mes}/${gestion}:`);
+  console.log(`   - Planilla mensual: ${planillaMensual.id_planilla_aportes}`);
+  console.log(`   - Planillas adicionales: ${planillasAdicionales.length} encontradas`);
+  console.log(`   - IDs a consultar: ${idsToCheck.join(', ')}`);
+
+  // 4. Obtener todos los detalles consolidados
   const detalles = await this.detalleRepo.find({
-    where: { id_planilla_aportes: planilla.id_planilla_aportes },
+    where: { 
+      id_planilla_aportes: In(idsToCheck) 
+    },
     order: { nro: 'ASC' },
   });
+
+  console.log(`   - Total detalles encontrados: ${detalles.length}`);
 
   return detalles;
 }
@@ -1396,7 +1455,7 @@ async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: stri
   // Si el mes anterior es diciembre, restar un año a la gestión
   const gestionMesAnterior = mesAnteriorNum === 12 ? (parseInt(gestion) - 1).toString() : gestion;
 
-  console.log(`Comparando planillas para:
+  console.log(`🔍 Comparando planillas (INCLUYENDO ADICIONALES) para:
     - Cod Patronal: ${cod_patronal}
     - Gestión Mes Anterior: ${gestionMesAnterior}
     - Mes Anterior: ${mesAnterior} (${mesAnteriorNum})
@@ -1415,12 +1474,13 @@ async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: stri
     throw new BadRequestException(`Fecha de planilla no válida para el mes actual: ${gestion}-${mesActualNum}`);
   }
 
-  // Obtener los detalles de las planillas de los dos meses
+  // CAMBIO PRINCIPAL: Ahora obtiene TODOS los detalles (mensual + adicionales)
   const detallesMesAnterior = await this.obtenerDetallesDeMes(cod_patronal, mesAnteriorNum.toString(), gestionMesAnterior);
   const detallesMesActual = await this.obtenerDetallesDeMes(cod_patronal, mesActualNum.toString(), gestion);
 
-  console.log('Detalles del mes anterior:', detallesMesAnterior);
-  console.log('Detalles del mes actual:', detallesMesActual);
+  console.log(`📊 Datos consolidados obtenidos:
+    - Mes anterior: ${detallesMesAnterior.length} trabajadores (mensual + adicionales)
+    - Mes actual: ${detallesMesActual.length} trabajadores (mensual + adicionales)`);
 
   // Validar si hay datos en ambos meses
   if (!detallesMesAnterior || detallesMesAnterior.length === 0) {
@@ -1455,65 +1515,54 @@ async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: stri
   const mesAnteriorFin = new Date(mesAnteriorInicio);
   mesAnteriorFin.setMonth(mesAnteriorFin.getMonth() + 1);
 
-  // Detectar altas basadas en fecha de ingreso y retiro (si aplica)
-  detallesMesActual.forEach((trabajadorActual) => {
-    if (trabajadorActual.fecha_ingreso) {
-      const fechaIngreso = new Date(trabajadorActual.fecha_ingreso);
+// Detectar altas basadas en ausencia en el mes anterior o reingreso
+detallesMesActual.forEach((trabajadorActual) => {
+  console.log(`👤 Analizando trabajador ${trabajadorActual.ci}`);
 
-      console.log(`Trabajador ${trabajadorActual.ci}: Fecha de ingreso: ${fechaIngreso}`);
-      console.log('Mes actual inicio:', mesActualInicio);
-      console.log('Mes actual fin:', mesActualFin);
+  // Verificar si el trabajador no estaba en el mes anterior
+  const trabajadorAnterior = trabajadoresMesAnterior.get(trabajadorActual.ci);
+  if (!trabajadorAnterior) {
+    console.log(`   ✅ ALTA detectada (nuevo trabajador)`);
+    altas.push(trabajadorActual);
+  } else if (trabajadorAnterior.fecha_retiro) {
+    // Si estaba en el mes anterior pero tenía fecha de retiro, verificar reingreso
+    const fechaRetiroAnterior = new Date(trabajadorAnterior.fecha_retiro);
+    console.log(`   ↳ Tenía fecha de retiro anterior: ${fechaRetiroAnterior}`);
 
-      // Verificar si la fecha de ingreso está dentro del mes actual
-      if (fechaIngreso >= mesActualInicio && fechaIngreso < mesActualFin) {
-        // Si el trabajador estaba en el mes anterior, verificar su fecha de retiro
-        const trabajadorAnterior = trabajadoresMesAnterior.get(trabajadorActual.ci);
-        if (trabajadorAnterior) {
-          if (trabajadorAnterior.fecha_retiro) {
-            const fechaRetiroAnterior = new Date(trabajadorAnterior.fecha_retiro);
-            console.log(`Trabajador ${trabajadorActual.ci}: Fecha de retiro anterior: ${fechaRetiroAnterior}`);
-            console.log('Mes anterior inicio:', mesAnteriorInicio);
-            console.log('Mes anterior fin:', mesAnteriorFin);
-
-            // Considerar alta si la fecha de retiro es anterior o igual al fin del mes anterior
-            if (fechaRetiroAnterior <= mesAnteriorFin) {
-              altas.push(trabajadorActual);
-            }
-          }
-          // Si no tiene fecha de retiro, no es alta (contrato activo en mes anterior)
-        } else {
-          // Si no estaba en el mes anterior, es alta directamente
-          altas.push(trabajadorActual);
-        }
-      }
+    // Considerar alta si la fecha de retiro es anterior o igual al fin del mes anterior
+    if (fechaRetiroAnterior <= mesAnteriorFin) {
+      console.log(`   ✅ ALTA detectada (reingreso)`);
+      altas.push(trabajadorActual);
     }
-  });
+  }
+});
 
-  // Detectar bajas por retiro (lógica original)
-  detallesMesActual.forEach((trabajadorActual) => {
-    if (trabajadorActual.fecha_retiro) {
-      const fechaRetiroActual = new Date(trabajadorActual.fecha_retiro);
-
-      console.log(`Trabajador ${trabajadorActual.ci}: Fecha de retiro: ${fechaRetiroActual}`);
-      console.log('Mes actual inicio:', mesActualInicio);
-      console.log('Mes actual fin:', mesActualFin);
-
-      if (fechaRetiroActual >= mesActualInicio && fechaRetiroActual < mesActualFin) {
-        bajasPorRetiro.push(trabajadorActual);
-      }
+// Detectar bajas por retiro
+detallesMesActual.forEach((trabajadorActual) => {
+  if (trabajadorActual.fecha_retiro) {
+    const fechaRetiroActual = new Date(trabajadorActual.fecha_retiro);
+    console.log(`👤 Analizando retiro - trabajador ${trabajadorActual.ci}: Fecha de retiro: ${fechaRetiroActual}`);
+    if (fechaRetiroActual >= mesActualInicio && fechaRetiroActual < mesActualFin) {
+      console.log(`   ❌ BAJA por retiro detectada`);
+      bajasPorRetiro.push(trabajadorActual);
     }
-  });
+  }
+});
 
-  // Detectar bajas por no encontrado (lógica original)
-  detallesMesAnterior.forEach((trabajadorAnterior) => {
-    if (!trabajadoresMesActual.has(trabajadorAnterior.ci)) {
-      bajasNoEncontradas.push(trabajadorAnterior);
-    }
-  });
+// Detectar bajas por no encontrado
+detallesMesAnterior.forEach((trabajadorAnterior) => {
+  if (!trabajadoresMesActual.has(trabajadorAnterior.ci)) {
+    console.log(`👤 BAJA por no encontrado - trabajador ${trabajadorAnterior.ci}`);
+    bajasNoEncontradas.push(trabajadorAnterior);
+  }
+});
 
-  console.log('Altas detectadas:', altas);
-  console.log('Bajas por trabajador no encontrado:', bajasNoEncontradas);
-  console.log('Bajas por fecha de retiro:', bajasPorRetiro);
+  console.log(`
+📈 RESUMEN DE COMPARACIÓN (INCLUYENDO ADICIONALES):
+   ✅ Altas detectadas: ${altas.length}
+   ❌ Bajas por trabajador no encontrado: ${bajasNoEncontradas.length}
+   ❌ Bajas por fecha de retiro: ${bajasPorRetiro.length}
+  `);
 
   return {
     altas,
@@ -1521,9 +1570,77 @@ async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: stri
       noEncontradas: bajasNoEncontradas,
       porRetiro: bajasPorRetiro,
     },
-    mensaje: 'Comparación de planillas completada con bajas agrupadas.',
+    resumen: {
+      totalTrabajadoresMesAnterior: detallesMesAnterior.length,
+      totalTrabajadoresMesActual: detallesMesActual.length,
+      totalAltas: altas.length,
+      totalBajas: bajasNoEncontradas.length + bajasPorRetiro.length
+    },
+    mensaje: 'Comparación de planillas completada incluyendo planillas adicionales.',
   };
 }
+// ?
+async obtenerEstadisticasPlanillaMes(cod_patronal: string, mes: string, gestion: string) {
+  const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
+  
+  // Buscar planilla mensual
+  const planillaMensual = await this.planillaRepo.findOne({
+    where: { 
+      cod_patronal, 
+      fecha_planilla: fechaPlanilla,
+      tipo_planilla: 'Mensual'
+    },
+  });
+
+  if (!planillaMensual) {
+    return {
+      existePlanilla: false,
+      mensaje: 'No existe planilla mensual para el período solicitado'
+    };
+  }
+
+  // Buscar planillas adicionales
+  const planillasAdicionales = await this.planillaRepo.find({
+    where: { 
+      id_planilla_origen: planillaMensual.id_planilla_aportes 
+    },
+  });
+
+  // Obtener detalles consolidados
+  const idsToCheck = [
+    planillaMensual.id_planilla_aportes,
+    ...planillasAdicionales.map(p => p.id_planilla_aportes)
+  ];
+
+  const totalDetalles = await this.detalleRepo.count({
+    where: { 
+      id_planilla_aportes: In(idsToCheck) 
+    }
+  });
+
+  return {
+    existePlanilla: true,
+    planillaMensual: {
+      id: planillaMensual.id_planilla_aportes,
+      totalImporte: planillaMensual.total_importe,
+      totalTrabajadores: planillaMensual.total_trabaj,
+      estado: planillaMensual.estado
+    },
+    planillasAdicionales: planillasAdicionales.map(p => ({
+      id: p.id_planilla_aportes,
+      totalImporte: p.total_importe,
+      totalTrabajadores: p.total_trabaj,
+      estado: p.estado
+    })),
+    consolidado: {
+      totalPlanillas: 1 + planillasAdicionales.length,
+      totalTrabajadoresConsolidado: totalDetalles,
+      totalImporteConsolidado: planillaMensual.total_importe // Ya está actualizado con las adicionales
+    }
+  };
+}
+
+
 //* 18.-  Método para generar el reporte de bajas con Carbone -------------------------------------------------------------------------------------------------------
 async generarReporteBajas(id_planilla: number,cod_patronal: string): Promise<StreamableFile> {
   try {
@@ -1841,19 +1958,18 @@ async obtenerDatosPlanillaPorRegional(id_planilla: number): Promise<any> {
   }
 }
 
-
 // 21 ACTUALIZAR FECHA PAGO EN PLANILLA APORTE --------------------------------------------------------------------------------------------------------------------------------------------------------------
-async actualizarFechaPago(id_planilla: number, fechaPago?: Date) {
-  const planilla = await this.planillaRepo.findOne({ where: { id_planilla_aportes: id_planilla } });
+async actualizarFechaPago(idPlanilla: number, fechaPago: Date): Promise<void> {
+  const planilla = await this.planillaRepo.findOne({
+    where: { id_planilla_aportes: idPlanilla }
+  });
 
   if (!planilla) {
-    throw new BadRequestException('La planilla no existe');
+    throw new BadRequestException('Planilla no encontrada');
   }
 
   planilla.fecha_pago = fechaPago;
   await this.planillaRepo.save(planilla);
-
-  return { mensaje: 'Fecha de pago de la planilla añadida correctamente' };
 }
 // 22.-  Función para consultar la API del Banco Central y obtener el UFV de una fecha específica -------------------------------------------------------------------------------------------------------
 async getUfvForDate(fecha: Date): Promise<number> {
@@ -2218,6 +2334,137 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
     throw new BadRequestException(`Error al calcular los aportes preliminares: ${error.message}`);
   }
 }
+
+async actualizarPlanillaConLiquidacion(idPlanilla: number, fechaPago: Date, datosLiquidacion: any): Promise<void> {
+  try {
+    const planilla = await this.planillaRepo.findOne({
+      where: { id_planilla_aportes: idPlanilla }
+    });
+
+    if (!planilla) {
+      throw new BadRequestException('Planilla no encontrada');
+    }
+
+    // Actualizar todos los campos calculados
+    planilla.fecha_pago = fechaPago;
+    planilla.fecha_liquidacion = new Date(); // Fecha actual como fecha de liquidación
+    planilla.aporte_porcentaje = datosLiquidacion.aporte_porcentaje;
+    planilla.ufv_dia_formal = datosLiquidacion.ufv_dia_formal;
+    planilla.ufv_dia_presentacion = datosLiquidacion.ufv_dia_presentacion;
+    planilla.aporte_actualizado = datosLiquidacion.aporte_actualizado;
+    planilla.monto_actualizado = datosLiquidacion.monto_actualizado;
+    planilla.multa_no_presentacion = datosLiquidacion.multa_no_presentacion;
+    planilla.dias_retraso = datosLiquidacion.dias_retraso;
+    planilla.intereses = datosLiquidacion.intereses;
+    planilla.multa_sobre_intereses = datosLiquidacion.multa_sobre_intereses;
+    planilla.total_a_cancelar_parcial = datosLiquidacion.total_a_cancelar_parcial;
+    planilla.total_multas = datosLiquidacion.total_multas;
+    planilla.total_tasa_interes = datosLiquidacion.total_tasa_interes;
+    planilla.total_a_cancelar = datosLiquidacion.total_a_cancelar;
+    planilla.fecha_presentacion_oficial = datosLiquidacion.fecha_presentacion_oficial;
+    planilla.fecha_deposito_presentacion = datosLiquidacion.fechaPagoUfv;
+    
+    // Actualizar campos de aportes ASUSS y Min Salud
+    planilla.total_aportes_asuss = datosLiquidacion.aporte_porcentaje * 0.005;
+    planilla.total_aportes_min_salud = datosLiquidacion.descuento_min_salud || 0;
+
+    await this.planillaRepo.save(planilla);
+    
+    console.log(`Planilla ${idPlanilla} actualizada con datos de liquidación`);
+  } catch (error) {
+    throw new BadRequestException(`Error al actualizar planilla con liquidación: ${error.message}`);
+  }
+}
+async obtenerLiquidacion(idPlanilla: number): Promise<any> {
+  try {
+    const planilla = await this.planillaRepo.findOne({
+      where: { id_planilla_aportes: idPlanilla },
+      relations: ['empresa'],
+    });
+
+    if (!planilla) {
+      throw new BadRequestException('Planilla no encontrada');
+    }
+
+    // Verificar si la planilla ya tiene liquidación calculada
+    if (planilla.fecha_liquidacion && planilla.total_a_cancelar !== null) {
+      console.log(`Planilla ${idPlanilla} ya tiene liquidación calculada`);
+      
+      // Retornar los datos ya guardados
+      return {
+        total_importe: planilla.total_importe,
+        aporte_porcentaje: planilla.aporte_porcentaje,
+        cotizacion_tasa: planilla.cotizacion_tasa,
+        ufv_dia_formal: planilla.ufv_dia_formal,
+        ufv_dia_presentacion: planilla.ufv_dia_presentacion,
+        fecha_declarada: planilla.fecha_declarada,
+        fecha_pago: planilla.fecha_pago,
+        fecha_liquidacion: planilla.fecha_liquidacion,
+        aporte_actualizado: planilla.aporte_actualizado,
+        monto_actualizado: planilla.monto_actualizado,
+        multa_no_presentacion: planilla.multa_no_presentacion,
+        dias_retraso: planilla.dias_retraso,
+        intereses: planilla.intereses,
+        multa_sobre_intereses: planilla.multa_sobre_intereses,
+        total_a_cancelar_parcial: planilla.total_a_cancelar_parcial,
+        total_multas: planilla.total_multas,
+        total_tasa_interes: planilla.total_tasa_interes,
+        total_deducciones: planilla.total_deducciones,
+        descuento_min_salud: planilla.total_aportes_min_salud,
+        otros_descuentos: planilla.otros_descuentos,
+        total_a_cancelar: planilla.total_a_cancelar,
+        tipo_empresa: planilla.empresa?.tipo,
+        total_aportes_asuss: planilla.total_aportes_asuss,
+        total_aportes_min_salud: planilla.total_aportes_min_salud,
+        excedente: planilla.excedente,
+        motivo_excedente: planilla.motivo_excedente,
+        fechaFormal: planilla.fecha_presentacion_oficial,
+        fechaPagoUfv: planilla.fecha_deposito_presentacion
+      };
+    }
+
+    // Si no tiene liquidación y tiene fecha_pago, calcularla
+    if (planilla.fecha_pago) {
+      console.log(`Calculando liquidación para planilla ${idPlanilla}`);
+      return await this.calcularAportes(idPlanilla);
+    }
+
+    // Si no tiene ni liquidación ni fecha_pago
+    throw new BadRequestException('La planilla no tiene fecha de pago ni liquidación calculada');
+  } catch (error) {
+    throw new BadRequestException(`Error al obtener liquidación: ${error.message}`);
+  }
+}
+async recalcularLiquidacion(idPlanilla: number, forzar: boolean = false): Promise<any> {
+  try {
+    const planilla = await this.planillaRepo.findOne({
+      where: { id_planilla_aportes: idPlanilla }
+    });
+
+    if (!planilla) {
+      throw new BadRequestException('Planilla no encontrada');
+    }
+
+    if (!planilla.fecha_pago) {
+      throw new BadRequestException('La planilla no tiene fecha de pago');
+    }
+
+    // Si no se fuerza y ya tiene liquidación, preguntar confirmación
+    if (!forzar && planilla.fecha_liquidacion) {
+      return {
+        mensaje: 'La planilla ya tiene una liquidación calculada',
+        fecha_liquidacion: planilla.fecha_liquidacion,
+        requiere_confirmacion: true
+      };
+    }
+
+    // Recalcular
+    return await this.calcularAportes(idPlanilla);
+  } catch (error) {
+    throw new BadRequestException(`Error al recalcular liquidación: ${error.message}`);
+  }
+}
+
 
 
 

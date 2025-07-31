@@ -56,6 +56,12 @@ export class PlanillasAporte {
   @Column({ nullable: true })
   fecha_liquidacion: Date;
 
+  @Column({ nullable: true })
+  fecha_presentacion_oficial: Date;
+
+  @Column({ nullable: true })
+  fecha_deposito_presentacion: Date;
+
   @Column({ type: 'decimal', precision: 18, scale: 6, nullable: true })
   aporte_porcentaje: number;
 

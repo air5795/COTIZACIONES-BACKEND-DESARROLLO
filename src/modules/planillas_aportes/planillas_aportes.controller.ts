@@ -671,6 +671,40 @@ export class PlanillasAportesController {
    }
  }
 
+ // nuevos controladores paara la liquidacion
+  @Get(':id/liquidacion')
+  async obtenerLiquidacion(@Param('id') id: number) {
+    return await this.planillasAportesService.obtenerLiquidacion(id);
+  }
+
+  @Post(':id/recalcular-liquidacion')
+  async recalcularLiquidacion(
+    @Param('id') id: number,
+    @Body('forzar') forzar: boolean = false
+  ) {
+    return await this.planillasAportesService.recalcularLiquidacion(id, forzar);
+  }
+
+  @Post(':id/recalcular-liquidacion-fecha')
+async recalcularLiquidacionConFecha(
+  @Param('id') id: number,
+  @Body() body: { fechaPago: string; forzar: boolean }
+) {
+  const fechaPago = new Date(body.fechaPago);
+  
+  // Primero obtener los datos de preliquidación con la nueva fecha
+  const datosLiquidacion = await this.planillasAportesService.calcularAportesPreliminar(id, fechaPago);
+  
+  // Actualizar la planilla con todos los datos calculados
+  await this.planillasAportesService.actualizarPlanillaConLiquidacion(id, fechaPago, datosLiquidacion);
+  
+  // Retornar los datos actualizados
+  return await this.planillasAportesService.obtenerLiquidacion(id);
+}
+
+
+
+
  // 25.-  reporte
 
  @Get('reporte-aportes/:id_planilla')
@@ -878,6 +912,8 @@ async obtenerResumenPlanillaMensual(@Param('id_planilla') id_planilla: number) {
     );
   }
 }
+
+
 
 
 
