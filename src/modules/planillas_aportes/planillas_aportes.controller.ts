@@ -1,4 +1,4 @@
-import { Controller, Post, Get,StreamableFile, UseInterceptors, UploadedFile, BadRequestException, Body, Param, Put, HttpException, HttpStatus, Res, Delete, Query, ParseIntPipe } from '@nestjs/common';
+import { Controller, Post, Get,StreamableFile, UseInterceptors, UploadedFile, BadRequestException, Body, Param, Put, HttpException, HttpStatus, Res, Delete, Query, ParseIntPipe, Sse } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { PlanillasAportesService } from './planillas_aportes.service';
@@ -7,6 +7,7 @@ import { query, Response } from 'express';
 import { CreatePlanillasAporteDto } from './dto/create-planillas_aporte.dto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Observable } from 'rxjs';
 
 
 @ApiTags('Planillas Aportes')
@@ -16,9 +17,10 @@ export class PlanillasAportesController {
     private readonly planillasAportesService: PlanillasAportesService,
   ) {}
 
-  // (estaticas ) DESCARGAR PLANTILLA DE APORTES EN EXCEL -----------------------------------------------------
+  //* DESCARGAR PLANTILLA DE EXCEL PARA PLANILLAS DE APORTES -----------------------------------------------------
 
   @Get('descargar-plantilla')
+  @ApiTags('Reportes')
   @ApiOperation({ summary: 'Descargar la plantilla Excel para aportes' })
   @ApiResponse({ status: 200, description: 'Plantilla descargada con éxito', type: StreamableFile })
   @ApiResponse({ status: 400, description: 'Error al descargar la plantilla' })
@@ -804,42 +806,15 @@ async generarReporteHistorial(
 
   // 29 .- 
 
-  @Put('validar-liquidacion/:id_planilla')
-  @ApiOperation({ summary: 'Validar liquidación y actualizar fecha de pago y liquidación' })
-  @ApiParam({ name: 'id_planilla', type: Number, description: 'ID de la planilla' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        fecha_pago: { 
-          type: 'string', 
-          format: 'date-time', 
-          example: '2025-05-19T00:00:00.000Z',
-          description: 'Fecha de pago (opcional)',
-          nullable: true,
-        },
-      },
-    },
-  })
-  @ApiResponse({ status: 200, description: 'Liquidación validada con éxito' })
-  @ApiResponse({ status: 400, description: 'Error en la solicitud' })
-  @ApiResponse({ status: 404, description: 'Planilla no encontrada' })
-  async validarLiquidacion(
-    @Param('id_planilla') id_planilla: number,
-    @Body() body: { fecha_pago?: string },
-  ) {
-    try {
-      return await this.planillasAportesService.validarLiquidacion(id_planilla, body);
-    } catch (error) {
-      throw new HttpException(
-        {
-          status: HttpStatus.BAD_REQUEST,
-          error: error.message,
-        },
-        error.status || HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
+@Put('validar-liquidacion/:id')
+async validarLiquidacion(
+  @Param('id') id: number,
+  @Body() payload: { fecha_pago?: string; valido_cotizacion?: string }
+) {
+  return await this.planillasAportesService.validarLiquidacion(id, payload);
+}
+
+
 
 
 // 30 .- REPORTE AFILIACIONES VIGENTE NO VIGENTES 
@@ -890,8 +865,97 @@ async generarReporteDetallesExcel(
   }
 }
 
+// 32.- VERIFICAR SI LOS CI ESTÁN EN AFILIACIONES (VERIFICACIÓN SIMPLE - OPTIMIZADA)
+@Post('verificar-ci-simple/:id_planilla')
+@ApiOperation({ 
+  summary: 'Verificar si los CIs de una planilla tienen registro en el sistema de afiliaciones', 
+  description: `Consulta si cada CI tiene registro en afiliaciones. 
+  ENCONTRADOS: Incluye estados VIGENTE, BAJA, y otros (cualquier registro existente en el sistema).
+  NO ENCONTRADOS: Solo cuando el sistema responde "No existe datos del Asegurado".
+  NOTA: Los asegurados con estado BAJA SÍ se consideran encontrados porque existen en el sistema.
+  Devuelve únicamente los NO encontrados en el array de resultados.` 
+})
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
+@ApiResponse({ 
+  status: 200, 
+  description: 'Verificación completada con éxito',
+  schema: {
+    type: 'object',
+    properties: {
+      mensaje: { type: 'string' },
+      resumen: {
+        type: 'object',
+        properties: {
+          total_consultados: { type: 'number' },
+          consultas_exitosas: { type: 'number' },
+          consultas_con_error: { type: 'number' },
+          encontrados_en_afiliaciones: { type: 'number', description: 'Incluye VIGENTE, BAJA y otros estados' },
+          no_encontrados_en_afiliaciones: { type: 'number', description: 'Solo los que no existen en el sistema' },
+          porcentaje_encontrados: { type: 'string' }
+        }
+      },
+      resultados: {
+        type: 'array',
+        description: 'Array con solo los CIs que NO existen en el sistema de afiliaciones',
+        items: {
+          type: 'object',
+          properties: {
+            ci: { type: 'string' },
+            nombre_completo: { type: 'string' },
+            encontrado_en_afiliaciones: { type: 'boolean', enum: [false] },
+            estado_consulta: { type: 'string' },
+            mensaje: { type: 'string' },
+            mensaje_api: { type: 'string', description: 'Mensaje original del API de afiliaciones' }
+          }
+        }
+      }
+    }
+  }
+})
+@ApiResponse({ status: 400, description: 'Error al verificar CIs' })
+@ApiResponse({ status: 408, description: 'Timeout - La verificación está en progreso, revisar logs del servidor' })
+async verificarCiEnAfiliaciones(@Param('id_planilla', ParseIntPipe) id_planilla: number) {
+  try {
+    return await this.planillasAportesService.verificarCiEnAfiliaciones(id_planilla);
+  } catch (error) {
+    throw new BadRequestException(error.message);
+  }
+}
 
-// 34 .- 
+// 33.- GENERAR REPORTE PDF DE VERIFICACIÓN DE AFILIACIONES
+@Get('reporte-verificacion-afiliaciones/:id_planilla')
+@ApiOperation({ 
+  summary: 'Generar reporte PDF de verificación de afiliaciones', 
+  description: 'Genera un reporte completo con los CIs que NO fueron encontrados en el sistema de afiliaciones' 
+})
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
+@ApiResponse({ 
+  status: 200, 
+  description: 'Reporte PDF generado exitosamente', 
+  type: StreamableFile 
+})
+@ApiResponse({ status: 400, description: 'Error al generar el reporte' })
+async generarReporteVerificacionAfiliaciones(@Param('id_planilla', ParseIntPipe) id_planilla: number): Promise<StreamableFile> {
+  try {
+    const fileBuffer = await this.planillasAportesService.generarReporteVerificacionAfiliaciones(id_planilla);
+    if (!fileBuffer) {
+      throw new BadRequestException('No se pudo generar el reporte de verificación.');
+    }
+    return fileBuffer;
+  } catch (error) {
+    throw new BadRequestException({
+      message: 'Error al generar el reporte de verificación de afiliaciones',
+      details: error.message,
+    });
+  }
+}
+
+
+
+
+
+
+//  
 
 @Get('resumen/:id_planilla')
 @ApiOperation({ summary: 'Obtener resumen de planilla mensual con adicionales' })

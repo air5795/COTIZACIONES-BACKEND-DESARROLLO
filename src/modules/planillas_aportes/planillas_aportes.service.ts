@@ -5,7 +5,7 @@ import { PlanillasAporte } from './entities/planillas_aporte.entity';
 import { PlanillaAportesDetalles } from './entities/planillas_aportes_detalles.entity';
 import { HttpService } from '@nestjs/axios';
 import axios, { AxiosResponse } from 'axios';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, Observable, Subject } from 'rxjs';
 import * as xlsx from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -35,6 +35,7 @@ export class PlanillasAportesService {
     private readonly empresasService: EmpresasService,
     private readonly externalApiService: ExternalApiService,
   ) {}
+
 
 //* DESCARGAR PLANTILLA DE EXCEL PARA PLANILLAS DE APORTES
 async descargarPlantilla(): Promise<StreamableFile> {
@@ -945,6 +946,8 @@ async obtenerPlanilla(id_planilla: number) {
       nombre_creacion: planilla.nombre_creacion,
       cotizacion_tasa: planilla.cotizacion_tasa,
       tipo_planilla: planilla.tipo_planilla,
+      valido_cotizacion: planilla.valido_cotizacion,
+      fecha_liquidacion: planilla.fecha_liquidacion,
     };
 
     return { mensaje: 'Planilla obtenida con éxito', planilla: mappedPlanilla };
@@ -2104,9 +2107,12 @@ async calcularAportes(idPlanilla: number): Promise<any> {
     let formds08 = tipo === 'AV' ? 5 : 0;
     let totalACancelar = totalACancelarParcial + formds08;
 
+    // CAMBIO: Aplicar automáticamente el descuento del 5% para empresas públicas
     let totalDeducciones = 0;
     let descuentoMinSalud = 0;
-    if (planilla.aplica_descuento_min_salud) {
+    
+    if (tipo === 'AP') {
+      // Solo empresas públicas tienen el descuento del Ministerio de Salud
       descuentoMinSalud = aportePorcentaje * 0.05;
       totalDeducciones += descuentoMinSalud;
     }
@@ -2132,6 +2138,8 @@ async calcularAportes(idPlanilla: number): Promise<any> {
     planilla.total_a_cancelar = totalACancelar;
     planilla.total_aportes_asuss = aportePorcentaje * 0.005;
     planilla.total_aportes_min_salud = descuentoMinSalud;
+    planilla.total_deducciones = totalDeducciones;
+    planilla.aplica_descuento_min_salud = tipo === 'AP'; // Actualizar este campo
 
     // 🔄 Guardar cambios
     const resultado = await this.planillaRepo.save(planilla);
@@ -2160,6 +2168,8 @@ async calcularAportes(idPlanilla: number): Promise<any> {
       total_a_cancelar: totalACancelar,
       tasa_porcentaje: tasaPorcentaje,
       tipo_empresa: tipo,
+      aplica_descuento_min_salud: tipo === 'AP',
+      ley_descuento_min_salud: tipo === 'AP' ? 'LEY 2042' : null,
     };
   } catch (error) {
     throw new BadRequestException(`Error al calcular los aportes: ${error.message}`);
@@ -2264,8 +2274,6 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
       multaNoPresentacion = 0;
       console.log('No se aplica multa por no presentación, fecha declarada dentro del plazo oficial');
     }
-    
-    
 
     // ✅ Días de retraso
     const normalize = (d: Date) => {
@@ -2287,15 +2295,19 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
     const totalACancelarParcial =
       aportePorcentaje + montoActualizado + multaNoPresentacion + intereses + multaSobreIntereses;
 
-    // ✅ Deducciones
+    // ✅ DEDUCCIONES - SIMPLIFICADO
     let totalDeducciones = 0;
     let descuentoMinSalud = 0;
 
-    if (planilla.aplica_descuento_min_salud) {
+    // CAMBIO: Aplicar automáticamente el descuento del 5% para empresas públicas
+    if (tipo === 'AP') {
+      // Solo empresas públicas tienen el descuento del Ministerio de Salud
       descuentoMinSalud = aportePorcentaje * 0.05;
       totalDeducciones += descuentoMinSalud;
+      console.log('Aplicando descuento Ministerio de Salud (5%) para empresa pública:', descuentoMinSalud);
     }
 
+    // Agregar otros descuentos manuales si existen
     const otrosDescuentos = Number(planilla.otros_descuentos || 0);
     totalDeducciones += otrosDescuentos;
 
@@ -2329,6 +2341,9 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
       otros_descuentos: otrosDescuentos,
       total_a_cancelar: totalACancelar,
       tipo_empresa: tipo,
+      // Agregar información sobre la deducción aplicada
+      aplica_descuento_min_salud: tipo === 'AP',
+      ley_descuento_min_salud: tipo === 'AP' ? 'LEY 2042' : null,
     };
   } catch (error) {
     throw new BadRequestException(`Error al calcular los aportes preliminares: ${error.message}`);
@@ -2419,7 +2434,9 @@ async obtenerLiquidacion(idPlanilla: number): Promise<any> {
         excedente: planilla.excedente,
         motivo_excedente: planilla.motivo_excedente,
         fechaFormal: planilla.fecha_presentacion_oficial,
-        fechaPagoUfv: planilla.fecha_deposito_presentacion
+        fechaPagoUfv: planilla.fecha_deposito_presentacion,
+        valido_cotizacion: planilla.valido_cotizacion,
+        fecha_validacion: planilla.fecha_liquidacion,
       };
     }
 
@@ -2430,7 +2447,7 @@ async obtenerLiquidacion(idPlanilla: number): Promise<any> {
     }
 
     // Si no tiene ni liquidación ni fecha_pago
-    throw new BadRequestException('La planilla no tiene fecha de pago ni liquidación calculada');
+    throw new BadRequestException('La planilla no tiene fecha de pago ni liquidación calculada (EMPRESA NO REGISTRO EL PAGO)');
   } catch (error) {
     throw new BadRequestException(`Error al obtener liquidación: ${error.message}`);
   }
@@ -2539,6 +2556,8 @@ async generarReporteAportes(idPlanilla: number): Promise<StreamableFile> {
         com_nro: planilla.com_nro || 0,
         emp_nit: planilla.empresa ? planilla.empresa.emp_nit : 'N/A',
         emp_legal: planilla.empresa ? planilla.empresa.emp_legal : 'N/A',
+        valido_cotizacion: planilla.valido_cotizacion || 'N/A',
+        fecha_liquidacion: formatDate(planilla.fecha_liquidacion),
         /* detalles: planilla.detalles || [], */
       },
     };
@@ -2887,8 +2906,12 @@ for (const detalle of detalles) {
 }
 
 // 29 .- VALIDAR LIQUIDACIONES
-async validarLiquidacion(idPlanilla: number, payload: { fecha_pago?: string }): Promise<any> {
-  const planilla = await this.planillaRepo.findOne({ where: { id_planilla_aportes: idPlanilla } });
+
+async validarLiquidacion(idPlanilla: number, payload: { fecha_pago?: string; valido_cotizacion?: string }): Promise<any> {
+  const planilla = await this.planillaRepo.findOne({ 
+    where: { id_planilla_aportes: idPlanilla },
+    relations: ['empresa'] // Por si necesitas datos de la empresa
+  });
 
   if (!planilla) {
     throw new NotFoundException('La planilla no existe.');
@@ -2906,12 +2929,19 @@ async validarLiquidacion(idPlanilla: number, payload: { fecha_pago?: string }): 
   // Siempre actualizar fecha_liquidacion
   planilla.fecha_liquidacion = new Date();
 
+  // NUEVO: Actualizar el nombre del validador si se proporciona
+  if (payload.valido_cotizacion) {
+    planilla.valido_cotizacion = payload.valido_cotizacion;
+  }
+
   // Guardar los cambios
   const planillaActualizada = await this.planillaRepo.save(planilla);
 
   return {
-    mensaje: 'Liquidación validada y fechas actualizadas correctamente.',
+    mensaje: 'Liquidación validada correctamente.',
     planilla: planillaActualizada,
+    validado_por: payload.valido_cotizacion || 'No especificado',
+    fecha_validacion: planilla.fecha_liquidacion
   };
 }
 
@@ -3130,7 +3160,284 @@ async generarReporteDetallesExcel(idPlanilla: number): Promise<StreamableFile> {
   }
 }
 
-// 34.- 
+// 32.- VERIFICAR SI LOS CI ESTÁN EN EL SISTEMA DE AFILIACIONES (SOLO VERIFICACIÓN SIMPLE - OPTIMIZADO)
+async verificarCiEnAfiliaciones(idPlanilla: number): Promise<{ mensaje: string; resumen: any; resultados: any[] }> {
+  try {
+    // Validar parámetro
+    if (!idPlanilla || idPlanilla < 1) {
+      throw new BadRequestException('El ID de la planilla debe ser un número positivo');
+    }
+
+    // Obtener todos los detalles de la planilla
+    const detalles = await this.detalleRepo.find({
+      where: { id_planilla_aportes: idPlanilla },
+      select: ['ci', 'nombres', 'apellido_paterno', 'apellido_materno'], // Solo los campos necesarios
+    });
+
+    if (!detalles || detalles.length === 0) {
+      throw new BadRequestException('No se encontraron detalles para la planilla especificada');
+    }
+
+    // Asegurarse de que el token esté disponible
+    if (!this.externalApiService.getApiToken()) {
+      await this.externalApiService.loginToExternalApi();
+    }
+
+    let consultasExitosas = 0;
+    let consultasConError = 0;
+    let encontrados = 0;
+    let noEncontrados = 0;
+    const resultadosNoEncontrados: any[] = []; // Solo guardar los no encontrados
+
+    console.log(`🔍 Iniciando verificación simple de ${detalles.length} CIs en el sistema de afiliaciones`);
+
+    // ✅ OPTIMIZACIÓN: Procesar en lotes SIN pLimit (para evitar problemas de importación)
+    const batchSize = 50; // Procesar de a 50
+    const maxConcurrent = 5; // Máximo 5 consultas simultáneas
+
+    // Procesar en lotes
+    for (let i = 0; i < detalles.length; i += batchSize) {
+      const batch = detalles.slice(i, i + batchSize);
+      
+      console.log(`📦 Procesando lote ${Math.floor(i / batchSize) + 1}/${Math.ceil(detalles.length / batchSize)} (${batch.length} registros)`);
+
+      // Procesar lote con Promise.allSettled para manejar errores
+      const promises = batch.map(async (detalle) => {
+        try {
+          // Extraer el número base del CI (antes del guion)
+          const ciBase = detalle.ci.split('-')[0].trim();
+
+          // Llamar al servicio externo
+          const response = await this.externalApiService.getAseguradoByCi(ciBase);
+
+          // ✅ LÓGICA CORREGIDA: Todas las consultas que no fallan son exitosas
+          consultasExitosas++; // ✅ Mover aquí para contar todas las respuestas del API
+          
+          if (response.status && response.data) {
+            // ✅ ENCONTRADO: Tiene datos en datosAsegurado (VIGENTE, etc.)
+            encontrados++;
+            return { 
+              success: true, 
+              ci: detalle.ci, 
+              encontrado: true,
+              detalle,
+              estado_afiliacion: response.data.ASE_ESTADO || 'DESCONOCIDO',
+              mensaje_api: response.msg || 'Datos encontrados'
+            };
+          } else if (response.status === false && response.data === null && 
+                     response.msg && response.msg.toLowerCase().includes('estado de baja')) {
+            // ✅ ENCONTRADO: Estado BAJA - SÍ existe en el sistema
+            encontrados++;
+            return { 
+              success: true, 
+              ci: detalle.ci, 
+              encontrado: true,
+              detalle,
+              estado_afiliacion: 'BAJA',
+              mensaje_api: response.msg || 'Asegurado con estado BAJA'
+            };
+          } else if (response.status && response.data === null && 
+                     response.msg && response.msg.toLowerCase().includes('no existe datos del asegurado')) {
+            // ✅ ENCONTRADO PERO SIN DATOS: Consulta exitosa pero no tiene registro
+            // NO incrementamos encontrados ni noEncontrados aquí
+            // Esta es una consulta exitosa que simplemente no tiene datos
+            encontrados++; // ✅ Considerarlo como encontrado ya que la consulta fue exitosa
+            return { 
+              success: true, 
+              ci: detalle.ci, 
+              encontrado: true,
+              detalle,
+              estado_afiliacion: 'SIN_REGISTRO',
+              mensaje_api: response.msg
+            };
+          } else {
+            // ✅ ENCONTRADO: Cualquier otra respuesta válida del API
+            encontrados++;
+            return { 
+              success: true, 
+              ci: detalle.ci, 
+              encontrado: true,
+              detalle,
+              estado_afiliacion: 'OTRO',
+              mensaje_api: response.msg || 'Respuesta válida del sistema'
+            };
+          }
+        } catch (error) {
+          // ❌ ERROR: Solo los errores de conexión/timeout se consideran no encontrados
+          consultasConError++;
+          noEncontrados++; // Solo los errores técnicos van a no encontrados
+          console.error(`❌ Error al consultar CI ${detalle.ci}: ${error.message}`);
+          
+          // Solo agregar errores a resultados (no las consultas exitosas sin datos)
+          const resultado = {
+            ci: detalle.ci,
+            nombre_completo: `${detalle.apellido_paterno} ${detalle.apellido_materno} ${detalle.nombres}`,
+            encontrado_en_afiliaciones: false,
+            estado_consulta: 'error',
+            mensaje: `Error en la consulta: ${error.message}`,
+            mensaje_api: 'Error de conexión o servicio no disponible'
+          };
+          resultadosNoEncontrados.push(resultado);
+          
+          return { 
+            success: false, 
+            ci: detalle.ci, 
+            error: error.message,
+            detalle 
+          };
+        }
+      });
+
+      // Esperar a que termine el lote
+      const resultadosLote = await Promise.allSettled(promises);
+      
+      // ✅ NO necesitamos contar consultas exitosas aquí porque ya se cuentan en el try
+
+      // Mostrar progreso cada 1000 registros
+      if ((i + batchSize) % 1000 === 0 || i + batchSize >= detalles.length) {
+        const progreso = Math.min(i + batchSize, detalles.length);
+        const porcentaje = ((progreso / detalles.length) * 100).toFixed(1);
+        console.log(`⏳ Progreso: ${progreso}/${detalles.length} (${porcentaje}%) - Encontrados: ${encontrados}, No encontrados: ${noEncontrados}, Errores: ${consultasConError}`);
+      }
+
+      // ✅ Pequeña pausa entre lotes para no saturar el API
+      if (i + batchSize < detalles.length) {
+        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms de pausa
+      }
+    }
+
+    // Generar resumen final
+    const resumen = {
+      total_consultados: detalles.length,
+      consultas_exitosas: consultasExitosas,
+      consultas_con_error: consultasConError,
+      encontrados_en_afiliaciones: encontrados,
+      no_encontrados_en_afiliaciones: noEncontrados, // ✅ Ahora incluye errores
+      porcentaje_encontrados: detalles.length > 0 ? ((encontrados / detalles.length) * 100).toFixed(2) + '%' : '0%'
+    };
+
+    console.log(`📊 RESUMEN FINAL:`, resumen);
+    console.log(`📋 Total de no encontrados en resultados: ${resultadosNoEncontrados.length}`);
+
+    return {
+      mensaje: `✅ Verificación completada. ${encontrados} de ${detalles.length} CIs encontrados en afiliaciones (${resumen.porcentaje_encontrados}).`,
+      resumen,
+      resultados: resultadosNoEncontrados // Solo los no encontrados y errores
+    };
+
+  } catch (error) {
+    throw new BadRequestException(`Error al verificar CIs en afiliaciones: ${error.message}`);
+  }
+}
+
+// 33.- GENERAR REPORTE PDF DE VERIFICACIÓN DE AFILIACIONES
+async generarReporteVerificacionAfiliaciones(idPlanilla: number): Promise<StreamableFile> {
+  try {
+    // Validar parámetro
+    if (!idPlanilla || idPlanilla < 1) {
+      throw new BadRequestException('El ID de la planilla debe ser un número positivo');
+    }
+
+    // Obtener información de la planilla
+    const planillaInfo = await this.obtenerPlanilla(idPlanilla);
+    if (!planillaInfo || !planillaInfo.planilla) {
+      throw new BadRequestException('No se encontró la planilla especificada');
+    }
+
+    // Ejecutar la verificación
+    const verificacion = await this.verificarCiEnAfiliaciones(idPlanilla);
+
+    // Configurar moment para español
+    moment.locale('es');
+
+    // Preparar los datos para el reporte
+    const data = {
+      planilla: {
+        id_planilla_aportes: planillaInfo.planilla.id_planilla_aportes,
+        com_nro: planillaInfo.planilla.com_nro || 'S/N', // ✅ Número de comprobante
+        mes: planillaInfo.planilla.fecha_planilla
+          ? moment(planillaInfo.planilla.fecha_planilla).format('MMMM').toUpperCase()
+          : 'N/A',
+        anio: planillaInfo.planilla.fecha_planilla
+          ? moment(planillaInfo.planilla.fecha_planilla).format('YYYY')
+          : 'N/A',
+        gestion: planillaInfo.planilla.gestion || 'N/A', // ✅ Gestión de la planilla
+        empresa: planillaInfo.planilla.empresa?.nombre || 'No disponible', // ✅ Nombre de empresa
+        cod_patronal: planillaInfo.planilla.cod_patronal, // ✅ Número patronal
+        total_trabajadores: planillaInfo.planilla.total_trabaj,
+        fecha_reporte: moment().format('DD/MM/YYYY'),
+        hora_reporte: moment().format('HH:mm:ss'),
+      },
+      resumen: {
+        total_consultados: verificacion.resumen.total_consultados,
+        encontrados: verificacion.resumen.encontrados_en_afiliaciones,
+        no_encontrados: verificacion.resumen.no_encontrados_en_afiliaciones,
+        consultas_con_error: verificacion.resumen.consultas_con_error,
+        porcentaje_encontrados: verificacion.resumen.porcentaje_encontrados,
+        porcentaje_no_encontrados: verificacion.resumen.total_consultados > 0 
+          ? ((verificacion.resumen.no_encontrados_en_afiliaciones / verificacion.resumen.total_consultados) * 100).toFixed(2) + '%' 
+          : '0%'
+      },
+      no_encontrados: verificacion.resultados.map((resultado, index) => ({
+        nro: index + 1,
+        ci: resultado.ci,
+        nombre_completo: resultado.nombre_completo,
+        estado_consulta: resultado.estado_consulta,
+        mensaje: resultado.mensaje,
+        tipo_problema: resultado.estado_consulta === 'error' ? 'ERROR DE CONSULTA' : 'NO EXISTE EN SISTEMA'
+      })),
+      metadatos: {
+        total_no_encontrados: verificacion.resultados.length,
+        generado_por: planillaInfo.planilla.usuario_creacion || 'Sistema', // ✅ Usuario que generó
+        fecha_reporte: moment().format('DD/MM/YYYY'), // ✅ Fecha del reporte
+        hora_reporte: moment().format('HH:mm:ss'), // ✅ Hora del reporte
+        nota: '- CBES (Sistema de Gestión de Planillas)', // ✅ Nota adicional
+        mensaje_conclusion: verificacion.mensaje
+      }
+    };
+
+    console.log('Datos para el reporte de verificación de afiliaciones:', JSON.stringify(data, null, 2));
+
+    // Ruta de la plantilla
+    const templatePath = path.resolve('reports/verificacion_afiliaciones.docx');
+
+    // Verificar si la plantilla existe
+    if (!fs.existsSync(templatePath)) {
+      throw new BadRequestException(`La plantilla en ${templatePath} no existe`);
+    }
+
+    return new Promise<StreamableFile>((resolve, reject) => {
+      carbone.render(
+        templatePath,
+        data,
+        { convertTo: 'pdf' },
+        (err, result) => {
+          if (err) {
+            console.error('Error en Carbone:', err);
+            return reject(new BadRequestException(`Error al generar el reporte: ${err.message}`));
+          }
+
+          console.log('Reporte de verificación de afiliaciones generado correctamente');
+
+          if (typeof result === 'string') {
+            result = Buffer.from(result, 'utf-8');
+          }
+
+          resolve(
+            new StreamableFile(result, {
+              type: 'application/pdf',
+              disposition: `attachment; filename=verificacion_afiliaciones_planilla_${idPlanilla}_${moment().format('YYYYMMDD')}.pdf`,
+            }),
+          );
+        },
+      );
+    });
+  } catch (error) {
+    throw new BadRequestException(`Error al generar el reporte de verificación de afiliaciones: ${error.message}`);
+  }
+}
+
+// 
 async obtenerResumenConAdicionales(idPlanillaMensual: number) {
   const planillaMensual = await this.planillaRepo.findOne({
     where: { id_planilla_aportes: idPlanillaMensual },

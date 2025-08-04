@@ -128,6 +128,9 @@ export class PlanillasAporte {
   @Column({ type: 'text', nullable: true })
   motivo_excedente: string;
 
+    @Column({ type: 'text', nullable: true })
+  valido_cotizacion: string;
+
   @Column({ type: 'decimal', precision: 18, scale: 6, nullable: true })
   cotizacion_tasa: number;
 
