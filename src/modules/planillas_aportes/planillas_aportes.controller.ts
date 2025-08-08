@@ -1,4 +1,4 @@
-import { Controller, Post, Get,StreamableFile, UseInterceptors, UploadedFile, BadRequestException, Body, Param, Put, HttpException, HttpStatus, Res, Delete, Query, ParseIntPipe, Sse } from '@nestjs/common';
+import { Controller, Post, Get,StreamableFile, UseInterceptors, UploadedFile, BadRequestException, Body, Param, Put, HttpException, HttpStatus, Res, Delete, Query, ParseIntPipe, Sse, Patch } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { PlanillasAportesService } from './planillas_aportes.service';
@@ -328,6 +328,8 @@ export class PlanillasAportesController {
       type: 'object',
       properties: {
         fecha_declarada: { type: 'string', description: 'Fecha de declaración (opcional)', format: 'date-time' },
+        usuario_procesador: { type: 'string', description: 'Usuario que presenta la planilla' },
+        nom_usuario: { type: 'string', description: 'Nombre completo del usuario' }
       },
     },
   })
@@ -335,23 +337,59 @@ export class PlanillasAportesController {
   @ApiResponse({ status: 400, description: 'Error al presentar planilla' })
   async actualizarEstadoAPendiente(
     @Param('id_planilla') id_planilla: number,
-    @Body('fecha_declarada') fecha_declarada?: string,
+    @Body() body: {
+      fecha_declarada?: string;
+      usuario_procesador?: string;
+      nom_usuario?: string;
+    }
   ) {
-    return await this.planillasAportesService.actualizarEstadoAPendiente(id_planilla, fecha_declarada);
+    return await this.planillasAportesService.actualizarEstadoAPendiente(
+      id_planilla, 
+      body.fecha_declarada,
+      body.usuario_procesador,
+      body.nom_usuario
+    );
   }
 
   // 12 .- ACTUALIZAR METODO PARA APROBAR U OBSERVAR LA PLANILLA (ESTADO 2 o 3) -------------------------------------
-  @Put('estado/:id_planilla')
-  async actualizarEstadoPlanilla(
-    @Param('id_planilla') id_planilla: number,
-    @Body() body,
-  ) {
-    return this.planillasAportesService.actualizarEstadoPlanilla(
-      id_planilla,
-      body.estado,
-      body.observaciones,
-    );
+
+@Put('estado/:id_planilla')
+@ApiOperation({ summary: 'Actualizar estado de planilla (aprobar/observar)' })
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
+@ApiBody({
+  description: 'Datos para actualizar el estado',
+  schema: {
+    type: 'object',
+    properties: {
+      estado: { type: 'number', enum: [2, 3], description: '2 = Aprobado, 3 = Observado' },
+      observaciones: { type: 'string', description: 'Observaciones (requerido si estado = 3)' },
+      usuario_procesador: { type: 'string', description: 'Usuario que procesa la planilla' },
+      nom_usuario: { type: 'string', description: 'Nombre completo del procesador' }
+    },
+    required: ['estado']
   }
+})
+@ApiResponse({ status: 200, description: 'Estado actualizado correctamente' })
+@ApiResponse({ status: 400, description: 'Error en la validación' })
+async actualizarEstadoPlanilla(
+  @Param('id_planilla') id_planilla: number,
+  @Body() body: {
+    estado: number;
+    observaciones?: string;
+    usuario_procesador?: string;
+    nom_usuario?: string;
+  },
+) {
+  console.log('🔧 Datos recibidos en el controlador:', body);
+  
+  return this.planillasAportesService.actualizarEstadoPlanilla(
+    id_planilla,
+    body.estado,
+    body.observaciones,
+    body.usuario_procesador,
+    body.nom_usuario
+  );
+}
 
   // 13.-  ELIMINAR DETALLES DE UNA PLANILLA DE APORTES -----------------------------------------------------
   @Delete('detalles/:id_planilla')
@@ -395,30 +433,39 @@ export class PlanillasAportesController {
   }
 
   // 15 .- MANDAR CORREGIDA PLANILLA DE APORTES OBSERVADA A ADMINSTRADOR CBES CUANDO (ESTADO = 3)- ---------------------
-  @Put('corregir/:id_planilla')
-  async corregirPlanilla(
-    @Param('id_planilla') id_planilla: number,
-    @Body() body,
-  ) {
-    return this.planillasAportesService.corregirPlanilla(id_planilla, body);
-  }
-
-  // Nuevo endpoint para hacer la comparacion para obtener altas y bajas
-
-  @Get('comparar/:cod_patronal/:gestion/:mesAnterior/:mesActual')
-  async compararPlanillas(
-    @Param('cod_patronal') cod_patronal: string,
-    @Param('gestion') gestion: string,
-    @Param('mesAnterior') mesAnterior: string,
-    @Param('mesActual') mesActual: string,
-  ) {
-    return await this.planillasAportesService.compararPlanillas(
-      cod_patronal,
-      mesAnterior,
-      gestion,
-      mesActual,
-    );
-  }
+    @Put('corregir/:id_planilla')
+    @ApiOperation({ summary: 'Corregir planilla observada' })
+    @ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
+    @ApiBody({
+      description: 'Datos de corrección de la planilla',
+      schema: {
+        type: 'object',
+        properties: {
+          trabajadores: {
+            type: 'array',
+            description: 'Lista de trabajadores corregidos',
+            items: { type: 'object' }
+          },
+          fecha_planilla: { type: 'string', description: 'Fecha de la planilla (opcional)', format: 'date' },
+          usuario_procesador: { type: 'string', description: 'Usuario que corrige la planilla' },
+          nom_usuario: { type: 'string', description: 'Nombre completo del usuario que corrige' }
+        },
+        required: ['trabajadores']
+      }
+    })
+    @ApiResponse({ status: 200, description: 'Planilla corregida exitosamente' })
+    @ApiResponse({ status: 400, description: 'Error al corregir planilla' })
+    async corregirPlanilla(
+      @Param('id_planilla') id_planilla: number,
+      @Body() body: {
+        trabajadores: any[];
+        fecha_planilla?: string;
+        usuario_procesador?: string;
+        nom_usuario?: string;
+      },
+    ) {
+      return this.planillasAportesService.corregirPlanilla(id_planilla, body);
+    }
 
   // Nuevo endpoint para generar el reporte de bajas
   @Get('reporte-bajas/:id_planilla/:cod_patronal')

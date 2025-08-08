@@ -1101,7 +1101,7 @@ async obtenerPlanillasPendientes() {
   };
 }
 // 11 .- ACTUALIZAR EL ESTADO DE UNA PLANILLA A PRESENTADO O PENDIENTE = 1 #con notificaciones# -------------------------------------------------------------------------------------------------------
-async actualizarEstadoAPendiente(id_planilla: number, fecha_declarada?: string) {
+async actualizarEstadoAPendiente(id_planilla: number, fecha_declarada?: string,usuario_procesador?: string, nom_usuario?: string) {
   const meses = [
     'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 
     'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
@@ -1180,6 +1180,8 @@ async actualizarEstadoAPendiente(id_planilla: number, fecha_declarada?: string) 
     mensaje: `Planilla Mensual Presentada correspondiente a MES: ${nombreMes}, AÑO: ${planilla.gestion}`,
     id_recurso: planilla.id_planilla_aportes,
     tipo_recurso: 'PLANILLA_APORTES',
+    usuario_creacion: usuario_procesador || 'SISTEMA',
+    nom_usuario: nom_usuario || 'Sistema Automático',
   };
   
   await this.notificacionesService.crearNotificacion(notificacionDto);
@@ -1191,15 +1193,23 @@ async actualizarEstadoAPendiente(id_planilla: number, fecha_declarada?: string) 
 }
 
 // 12 .- ACTUALIZAR METODO PARA APROBAR U OBSERVAR LA PLANILLA (ESTADO 2 o 3)- #con notificaciones# -------------------------------------------------------------------------------------------------------
-async actualizarEstadoPlanilla(id_planilla: number, estado: number, observaciones?: string) {
+async actualizarEstadoPlanilla(id_planilla: number, estado: number, observaciones?: string, usuario_procesador?: string, nom_usuario?: string) {
   const meses = [
     'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 
     'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
   ];
 
+  console.log('🔧 Datos recibidos en el servicio:', {
+    id_planilla,
+    estado,
+    observaciones,
+    usuario_procesador,
+    nom_usuario
+  });
+
   const planilla = await this.planillaRepo.findOne({ 
     where: { id_planilla_aportes: id_planilla },
-    relations: ['empresa'], // Necesitamos la relación con empresa para obtener emp_nom
+    relations: ['empresa'],
   });
 
   if (!planilla) {
@@ -1219,7 +1229,6 @@ async actualizarEstadoPlanilla(id_planilla: number, estado: number, observacione
 
   await this.planillaRepo.save(planilla);
 
-  // Generar notificación para COTIZACIONES_EMPRESA
   const nombreMes = meses[Number(planilla.mes) - 1];
   const tipoNotificacion = estado === 2 ? 'PLANILLA_APROBADA' : 'PLANILLA_OBSERVADA';
   const mensajeBase = estado === 2 
@@ -1233,7 +1242,11 @@ async actualizarEstadoPlanilla(id_planilla: number, estado: number, observacione
     mensaje: mensajeBase,
     id_recurso: planilla.id_planilla_aportes,
     tipo_recurso: 'PLANILLA_APORTES',
+    usuario_creacion: usuario_procesador || 'SISTEMA',
+    nom_usuario: nom_usuario || 'Sistema Automático',
   };
+  
+  console.log('Creando notificación con datos:', notificacionDto);
   
   await this.notificacionesService.crearNotificacion(notificacionDto);
 
@@ -1382,7 +1395,7 @@ async corregirPlanilla(id_planilla: number, data: any) {
 
   await this.detalleRepo.save(nuevosDetalles);
 
-  // Generar notificación para ADMINISTRADOR_COTIZACIONES
+  // 🔧 GENERAR NOTIFICACIÓN CON DATOS DEL USUARIO QUE CORRIGE
   const nombreMes = meses[Number(planilla.mes) - 1];
   const notificacionDto: CreateNotificacioneDto = {
     id_usuario_receptor: 'ADMINISTRADOR_COTIZACIONES',
@@ -1391,6 +1404,8 @@ async corregirPlanilla(id_planilla: number, data: any) {
     mensaje: `Planilla Mensual Corregida correspondiente a MES: ${nombreMes}, AÑO: ${planilla.gestion}`,
     id_recurso: planilla.id_planilla_aportes,
     tipo_recurso: 'PLANILLA_APORTES',
+    usuario_creacion: data.usuario_procesador || planilla.usuario_creacion || 'SISTEMA',
+    nom_usuario: data.nom_usuario || planilla.nombre_creacion || 'Usuario Sistema',
   };
   
   await this.notificacionesService.crearNotificacion(notificacionDto);

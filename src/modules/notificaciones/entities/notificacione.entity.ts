@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+
 @Entity({ schema: 'transversales', name: 'notificaciones' })
 export class Notificacion {
   @PrimaryGeneratedColumn({ type: 'int4' })
@@ -28,6 +29,9 @@ export class Notificacion {
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   fecha_creacion: Date;
 
-  @Column({ type: 'varchar', length: 100, default: () => 'CURRENT_USER' })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   usuario_creacion: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  nom_usuario: string;
 }

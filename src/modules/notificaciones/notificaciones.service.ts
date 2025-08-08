@@ -1,3 +1,4 @@
+// src/modules/notificaciones/notificaciones.service.ts
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -9,7 +10,7 @@ import { UpdateNotificacioneDto } from './dto/update-notificacione.dto';
 export class NotificacionesService {
   constructor(
     @InjectRepository(Notificacion)
-    private notificacionesRepo: Repository<Notificacion>,
+    public notificacionesRepo: Repository<Notificacion>, // ← CAMBIAR private por public
   ) {}
 
   async crearNotificacion(dto: CreateNotificacioneDto): Promise<Notificacion> {
@@ -55,6 +56,30 @@ export class NotificacionesService {
       await this.notificacionesRepo.update(id_notificacion, dto);
     } catch (error) {
       throw new BadRequestException(`Error al marcar notificación como leída: ${error.message}`);
+    }
+  }
+
+  async obtenerContadorNoLeidas(id_usuario_receptor: string): Promise<number> {
+    try {
+      return await this.notificacionesRepo.count({
+        where: {
+          id_usuario_receptor,
+          leido: false,
+        },
+      });
+    } catch (error) {
+      throw new BadRequestException(`Error al obtener contador: ${error.message}`);
+    }
+  }
+
+  async marcarTodasComoLeidas(id_usuario_receptor: string): Promise<void> {
+    try {
+      await this.notificacionesRepo.update(
+        { id_usuario_receptor, leido: false },
+        { leido: true }
+      );
+    } catch (error) {
+      throw new BadRequestException(`Error al marcar todas como leídas: ${error.message}`);
     }
   }
 }
