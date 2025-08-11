@@ -467,6 +467,23 @@ async actualizarEstadoPlanilla(
       return this.planillasAportesService.corregirPlanilla(id_planilla, body);
     }
 
+  // 17 .- endpoint para hacer la comparacion para obtener altas y bajas
+
+  @Get('comparar/:cod_patronal/:gestion/:mesAnterior/:mesActual')
+  async compararPlanillas(
+    @Param('cod_patronal') cod_patronal: string,
+    @Param('gestion') gestion: string,
+    @Param('mesAnterior') mesAnterior: string,
+    @Param('mesActual') mesActual: string,
+  ) {
+    return await this.planillasAportesService.compararPlanillas(
+      cod_patronal,
+      mesAnterior,
+      gestion,
+      mesActual,
+    );
+  }
+
   // Nuevo endpoint para generar el reporte de bajas
   @Get('reporte-bajas/:id_planilla/:cod_patronal')
   async generarReporteBajas(

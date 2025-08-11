@@ -220,16 +220,31 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
   const planillaGuardada = await this.planillaRepo.save(nuevaPlanilla);
 
   function parseExcelDate(value: any): string | undefined {
+    // Si el valor es null, undefined o está vacío, retornar undefined
     if (!value) return undefined;
+    
+    // Si es un string, limpiar espacios en blanco
+    if (typeof value === 'string') {
+      const cleanValue = value.trim();
+      // Si después de limpiar está vacío, retornar undefined (no es error)
+      if (cleanValue === '') return undefined;
+      
+      // Intentar parsear la fecha limpia
+      const parsedDate = moment(cleanValue, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY', 'DD-MM-YYYY'], true);
+      if (parsedDate.isValid()) {
+        return parsedDate.toISOString();
+      }
+      
+      // Si no es válida, lanzar error con el valor limpio
+      throw new BadRequestException(`Formato de fecha no válido: "${cleanValue}"`);
+    }
+
+    // Si es un número (fecha serial de Excel)
     if (typeof value === 'number' && !isNaN(value) && value > 0) {
       const date = new Date(1900, 0, value - 1);
-      return date.toISOString();
+      return isNaN(date.getTime()) ? undefined : date.toISOString();
     }
-    if (typeof value === 'string') {
-      const parsedDate = moment(value, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY'], true);
-      if (parsedDate.isValid()) return parsedDate.toISOString();
-      throw new BadRequestException(`Formato de fecha no válido: ${value}`);
-    }
+
     return undefined;
   }
 
@@ -386,22 +401,35 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
     }
   }
 
-  function parseExcelDate(value: any): string | undefined {
-    if (!value) return undefined;
+    function parseExcelDate(value: any): string | undefined {
+      // Si el valor es null, undefined o está vacío, retornar undefined
+      if (!value) return undefined;
+      
+      // Si es un string, limpiar espacios en blanco
+      if (typeof value === 'string') {
+        const cleanValue = value.trim();
+        // Si después de limpiar está vacío, retornar undefined (no es error)
+        if (cleanValue === '') return undefined;
+        
+        // Intentar parsear la fecha limpia
+        const parsedDate = moment(cleanValue, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY', 'DD-MM-YYYY'], true);
+        if (parsedDate.isValid()) {
+          return parsedDate.toISOString();
+        }
+        
+        // Si no es válida, lanzar error con el valor limpio
+        throw new BadRequestException(`Formato de fecha no válido: "${cleanValue}"`);
+      }
 
-    if (typeof value === 'number' && !isNaN(value) && value > 0) {
-      const date = new Date(1900, 0, value - 1);
-      return isNaN(date.getTime()) ? undefined : date.toISOString();
+      // Si es un número (fecha serial de Excel)
+      if (typeof value === 'number' && !isNaN(value) && value > 0) {
+        const date = new Date(1900, 0, value - 1);
+        return isNaN(date.getTime()) ? undefined : date.toISOString();
+      }
+
+      return undefined;
     }
 
-    if (typeof value === 'string') {
-      const parsedDate = moment(value, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY'], true);
-      if (parsedDate.isValid()) return parsedDate.toISOString();
-      throw new BadRequestException(`Formato de fecha no válido: ${value}`);
-    }
-
-    return undefined;
-  }
 
   let nroBase = 1;
   const tipoPlanilla = createPlanillaDto?.tipo_planilla || planilla.tipo_planilla;
@@ -1460,6 +1488,77 @@ async obtenerDetallesDeMes(cod_patronal: string, mes: string, gestion: string) {
   return detalles;
 }
 // 17.3.- Método para comparar planillas de dos meses y detectar altas y bajas 3 version-------------------------------------------------------------------------------------------------------
+//? 🔧 MÉTODO AUXILIAR: Consolidar trabajadores por CI para comparaciones
+private consolidarTrabajadoresParaComparacion(trabajadores: any[]): any[] {
+  const trabajadoresConsolidados = new Map();
+
+  trabajadores.forEach(trabajador => {
+    const ci = trabajador.ci;
+    
+    if (trabajadoresConsolidados.has(ci)) {
+      // Si ya existe, consolidar datos
+      const existente = trabajadoresConsolidados.get(ci);
+      
+      // Sumar salarios y montos
+      existente.salario += trabajador.salario;
+      existente.haber_basico += trabajador.haber_basico;
+      existente.bono_antiguedad += trabajador.bono_antiguedad;
+      existente.monto_horas_extra += trabajador.monto_horas_extra;
+      existente.monto_horas_extra_nocturnas += trabajador.monto_horas_extra_nocturnas;
+      existente.otros_bonos_pagos += trabajador.otros_bonos_pagos;
+      
+      // Concatenar cargos diferentes
+      const cargosExistentes = existente.cargo.split(' / ');
+      if (!cargosExistentes.includes(trabajador.cargo)) {
+        existente.cargo += ` / ${trabajador.cargo}`;
+      }
+      
+      // Mantener fecha de ingreso más antigua
+      if (trabajador.fecha_ingreso) {
+        const fechaExistente = new Date(existente.fecha_ingreso);
+        const fechaNueva = new Date(trabajador.fecha_ingreso);
+        if (fechaNueva < fechaExistente) {
+          existente.fecha_ingreso = trabajador.fecha_ingreso;
+        }
+      }
+      
+      // Mantener fecha de retiro más reciente (o null si alguno no tiene)
+      if (trabajador.fecha_retiro && existente.fecha_retiro) {
+        const fechaExistente = new Date(existente.fecha_retiro);
+        const fechaNueva = new Date(trabajador.fecha_retiro);
+        if (fechaNueva > fechaExistente) {
+          existente.fecha_retiro = trabajador.fecha_retiro;
+        }
+      } else if (!existente.fecha_retiro) {
+        // Si el trabajador existente no tiene fecha de retiro, mantenerlo así
+        existente.fecha_retiro = null;
+      }
+      
+      // Agregar metadatos de consolidación
+      existente._registros_consolidados = (existente._registros_consolidados || 1) + 1;
+      
+    } else {
+      // Primer registro de este CI
+      trabajadoresConsolidados.set(ci, {
+        ...trabajador,
+        _registros_consolidados: 1
+      });
+    }
+  });
+
+  const resultado = Array.from(trabajadoresConsolidados.values());
+  
+  // Log para debug
+  const consolidados = resultado.filter(t => t._registros_consolidados > 1);
+  if (consolidados.length > 0) {
+    console.log(`🔄 Consolidados ${consolidados.length} trabajadores con múltiples cargos:`);
+    consolidados.forEach(t => {
+      console.log(`   CI: ${t.ci} - ${t.nombres} ${t.apellido_paterno} (${t._registros_consolidados} cargos: ${t.cargo})`);
+    });
+  }
+
+  return resultado;
+}
 async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: string, mesActual: string) {
   // Convertir los meses a números
   const mesAnteriorNum = parseInt(mesAnterior, 10);
@@ -1492,20 +1591,28 @@ async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: stri
     throw new BadRequestException(`Fecha de planilla no válida para el mes actual: ${gestion}-${mesActualNum}`);
   }
 
-  // CAMBIO PRINCIPAL: Ahora obtiene TODOS los detalles (mensual + adicionales)
+  // Obtener TODOS los detalles (mensual + adicionales)
   const detallesMesAnterior = await this.obtenerDetallesDeMes(cod_patronal, mesAnteriorNum.toString(), gestionMesAnterior);
   const detallesMesActual = await this.obtenerDetallesDeMes(cod_patronal, mesActualNum.toString(), gestion);
 
-  console.log(`📊 Datos consolidados obtenidos:
-    - Mes anterior: ${detallesMesAnterior.length} trabajadores (mensual + adicionales)
-    - Mes actual: ${detallesMesActual.length} trabajadores (mensual + adicionales)`);
+  console.log(`📊 Datos originales obtenidos:
+    - Mes anterior: ${detallesMesAnterior.length} registros
+    - Mes actual: ${detallesMesActual.length} registros`);
+
+  // 🔄 CONSOLIDAR solo para la comparación (sin afectar datos originales)
+  const trabajadoresAnterioresConsolidados = this.consolidarTrabajadoresParaComparacion(detallesMesAnterior);
+  const trabajadoresActualesConsolidados = this.consolidarTrabajadoresParaComparacion(detallesMesActual);
+
+  console.log(`📊 Datos consolidados para comparación:
+    - Mes anterior: ${trabajadoresAnterioresConsolidados.length} trabajadores únicos
+    - Mes actual: ${trabajadoresActualesConsolidados.length} trabajadores únicos`);
 
   // Validar si hay datos en ambos meses
-  if (!detallesMesAnterior || detallesMesAnterior.length === 0) {
+  if (!trabajadoresAnterioresConsolidados || trabajadoresAnterioresConsolidados.length === 0) {
     throw new Error(`No se encontraron datos para el mes anterior (${mesAnterior}) en la gestión ${gestionMesAnterior}.`);
   }
 
-  if (!detallesMesActual || detallesMesActual.length === 0) {
+  if (!trabajadoresActualesConsolidados || trabajadoresActualesConsolidados.length === 0) {
     throw new Error(`No se encontraron datos para el mes actual (${mesActual}) en la gestión ${gestion}.`);
   }
 
@@ -1513,14 +1620,13 @@ async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: stri
   const bajasNoEncontradas = [];
   const bajasPorRetiro = [];
 
-  // Crear un mapa de los trabajadores del mes anterior basado en su CI
+  // Crear mapas con trabajadores consolidados
   const trabajadoresMesAnterior = new Map(
-    detallesMesAnterior.map((trabajador) => [trabajador.ci, trabajador]),
+    trabajadoresAnterioresConsolidados.map((trabajador) => [trabajador.ci, trabajador]),
   );
 
-  // Crear un mapa de los trabajadores del mes actual basado en su CI
   const trabajadoresMesActual = new Map(
-    detallesMesActual.map((trabajador) => [trabajador.ci, trabajador]),
+    trabajadoresActualesConsolidados.map((trabajador) => [trabajador.ci, trabajador]),
   );
 
   // Definir el rango del mes actual para las fechas de ingreso y retiro
@@ -1533,53 +1639,59 @@ async compararPlanillas(cod_patronal: string, mesAnterior: string, gestion: stri
   const mesAnteriorFin = new Date(mesAnteriorInicio);
   mesAnteriorFin.setMonth(mesAnteriorFin.getMonth() + 1);
 
-// Detectar altas basadas en ausencia en el mes anterior o reingreso
-detallesMesActual.forEach((trabajadorActual) => {
-  console.log(`👤 Analizando trabajador ${trabajadorActual.ci}`);
+  // Detectar altas basadas en ausencia en el mes anterior o reingreso
+  trabajadoresActualesConsolidados.forEach((trabajadorActual) => {
+    console.log(`👤 Analizando trabajador ${trabajadorActual.ci}`);
 
-  // Verificar si el trabajador no estaba en el mes anterior
-  const trabajadorAnterior = trabajadoresMesAnterior.get(trabajadorActual.ci);
-  if (!trabajadorAnterior) {
-    console.log(`   ✅ ALTA detectada (nuevo trabajador)`);
-    altas.push(trabajadorActual);
-  } else if (trabajadorAnterior.fecha_retiro) {
-    // Si estaba en el mes anterior pero tenía fecha de retiro, verificar reingreso
-    const fechaRetiroAnterior = new Date(trabajadorAnterior.fecha_retiro);
-    console.log(`   ↳ Tenía fecha de retiro anterior: ${fechaRetiroAnterior}`);
-
-    // Considerar alta si la fecha de retiro es anterior o igual al fin del mes anterior
-    if (fechaRetiroAnterior <= mesAnteriorFin) {
-      console.log(`   ✅ ALTA detectada (reingreso)`);
+    // Verificar si el trabajador no estaba en el mes anterior
+    const trabajadorAnterior = trabajadoresMesAnterior.get(trabajadorActual.ci);
+    if (!trabajadorAnterior) {
+      console.log(`   ✅ ALTA detectada (nuevo trabajador)`);
       altas.push(trabajadorActual);
-    }
-  }
-});
+    } else if (trabajadorAnterior.fecha_retiro) {
+      // Si estaba en el mes anterior pero tenía fecha de retiro, verificar reingreso
+      const fechaRetiroAnterior = new Date(trabajadorAnterior.fecha_retiro);
+      console.log(`   ↳ Tenía fecha de retiro anterior: ${fechaRetiroAnterior}`);
 
-// Detectar bajas por retiro
-detallesMesActual.forEach((trabajadorActual) => {
-  if (trabajadorActual.fecha_retiro) {
-    const fechaRetiroActual = new Date(trabajadorActual.fecha_retiro);
-    console.log(`👤 Analizando retiro - trabajador ${trabajadorActual.ci}: Fecha de retiro: ${fechaRetiroActual}`);
-    if (fechaRetiroActual >= mesActualInicio && fechaRetiroActual < mesActualFin) {
-      console.log(`   ❌ BAJA por retiro detectada`);
-      bajasPorRetiro.push(trabajadorActual);
+      // Considerar alta si la fecha de retiro es anterior o igual al fin del mes anterior
+      if (fechaRetiroAnterior <= mesAnteriorFin) {
+        console.log(`   ✅ ALTA detectada (reingreso)`);
+        altas.push(trabajadorActual);
+      }
     }
-  }
-});
+  });
 
-// Detectar bajas por no encontrado
-detallesMesAnterior.forEach((trabajadorAnterior) => {
-  if (!trabajadoresMesActual.has(trabajadorAnterior.ci)) {
-    console.log(`👤 BAJA por no encontrado - trabajador ${trabajadorAnterior.ci}`);
-    bajasNoEncontradas.push(trabajadorAnterior);
-  }
-});
+  // Detectar bajas por retiro
+  trabajadoresActualesConsolidados.forEach((trabajadorActual) => {
+    if (trabajadorActual.fecha_retiro) {
+      const fechaRetiroActual = new Date(trabajadorActual.fecha_retiro);
+      console.log(`👤 Analizando retiro - trabajador ${trabajadorActual.ci}: Fecha de retiro: ${fechaRetiroActual}`);
+      if (fechaRetiroActual >= mesActualInicio && fechaRetiroActual < mesActualFin) {
+        console.log(`   ❌ BAJA por retiro detectada`);
+        bajasPorRetiro.push(trabajadorActual);
+      }
+    }
+  });
+
+  // Detectar bajas por no encontrado
+  trabajadoresAnterioresConsolidados.forEach((trabajadorAnterior) => {
+    if (!trabajadoresMesActual.has(trabajadorAnterior.ci)) {
+      console.log(`👤 BAJA por no encontrado - trabajador ${trabajadorAnterior.ci}`);
+      bajasNoEncontradas.push(trabajadorAnterior);
+    }
+  });
 
   console.log(`
 📈 RESUMEN DE COMPARACIÓN (INCLUYENDO ADICIONALES):
    ✅ Altas detectadas: ${altas.length}
    ❌ Bajas por trabajador no encontrado: ${bajasNoEncontradas.length}
    ❌ Bajas por fecha de retiro: ${bajasPorRetiro.length}
+    Total trabajadores mes anterior: ${trabajadoresAnterioresConsolidados.length}
+    Total trabajadores mes actual: ${trabajadoresActualesConsolidados.length}
+    Total registros mes anterior: ${detallesMesAnterior.length}
+    Total registros mes actual: ${detallesMesActual.length}
+    Trabajadores con múltiples cargos mes anterior: ${trabajadoresAnterioresConsolidados.filter(t => t._registros_consolidados > 1).length}
+    Trabajadores con múltiples cargos mes actual: ${trabajadoresActualesConsolidados.filter(t => t._registros_consolidados > 1).length}
   `);
 
   return {
@@ -1589,12 +1701,17 @@ detallesMesAnterior.forEach((trabajadorAnterior) => {
       porRetiro: bajasPorRetiro,
     },
     resumen: {
-      totalTrabajadoresMesAnterior: detallesMesAnterior.length,
-      totalTrabajadoresMesActual: detallesMesActual.length,
+      totalTrabajadoresMesAnterior: trabajadoresAnterioresConsolidados.length, // Trabajadores únicos
+      totalTrabajadoresMesActual: trabajadoresActualesConsolidados.length,     // Trabajadores únicos
+      totalRegistrosMesAnterior: detallesMesAnterior.length,                   // Registros totales
+      totalRegistrosMesActual: detallesMesActual.length,                       // Registros totales
       totalAltas: altas.length,
-      totalBajas: bajasNoEncontradas.length + bajasPorRetiro.length
+      totalBajas: bajasNoEncontradas.length + bajasPorRetiro.length,
+      // Nueva info: trabajadores con múltiples cargos
+      trabajadoresMultiplesCargosAnterior: trabajadoresAnterioresConsolidados.filter(t => t._registros_consolidados > 1).length,
+      trabajadoresMultiplesCargosActual: trabajadoresActualesConsolidados.filter(t => t._registros_consolidados > 1).length
     },
-    mensaje: 'Comparación de planillas completada incluyendo planillas adicionales.',
+    mensaje: 'Comparación de planillas completada con consolidación automática por CI.',
   };
 }
 // ?
