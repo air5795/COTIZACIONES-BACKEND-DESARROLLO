@@ -59,12 +59,12 @@ private async actualizarTotalesPlanillaMensual(idPlanillaMensual: number, tipoEm
 
   const idsToCheck = planillasRelacionadas.map(p => p.id_planilla_aportes);
 
-  // Calcular totales consolidados desde los detalles
+  // Calcular totales consolidados desde los detalles (trabajadores únicos por CI)
   const totalesConsolidados = await this.detalleRepo
     .createQueryBuilder('detalle')
     .select([
       'SUM(detalle.salario) as total_importe',
-      'COUNT(*) as total_trabajadores'
+      'COUNT(DISTINCT detalle.ci) as total_trabajadores'
     ])
     .where('detalle.id_planilla_aportes IN (:...ids)', { ids: idsToCheck })
     .getRawOne();
@@ -198,7 +198,13 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
     cotizacionTasa = parseFloat((totalImporte * 0.1).toFixed(6));
   }
 
-  const totalTrabaj = data.length;
+  const trabajadoresUnicos = new Set(data.map(row => row['Número documento de identidad'])).size;
+  const totalTrabaj = trabajadoresUnicos;
+
+  console.log(`📊 Estadísticas de guardado:
+  - Registros totales: ${data.length}
+  - Trabajadores únicos: ${totalTrabaj}
+  - Trabajadores con múltiples cargos: ${data.length - totalTrabaj}`);
 
   const nuevaPlanilla = this.planillaRepo.create({
     cod_patronal,
@@ -309,9 +315,9 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
   }
 
   // NUEVO: Si es una planilla adicional, actualizar los totales de la planilla mensual
-  if (tipo_planilla === 'Planilla Adicional' && planillaMensualExistente) {
+  /* if (tipo_planilla === 'Planilla Adicional' && planillaMensualExistente) {
     await this.actualizarTotalesPlanillaMensual(planillaMensualExistente.id_planilla_aportes, tipoEmpresa);
-  }
+  } */
 
   return {
     mensaje: '✅ Planilla guardada con éxito',
@@ -458,7 +464,15 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
   }
 
   let totalImporte = 0;
-  const totalTrabaj = datosValidos.length;
+
+  // Contar trabajadores únicos por CI
+  const trabajadoresUnicos = new Set(datosValidos.map(row => row['Número documento de identidad'])).size;
+  const totalTrabaj = trabajadoresUnicos;
+
+  console.log(`📊 Estadísticas de actualización:
+  - Registros válidos: ${datosValidos.length}
+  - Trabajadores únicos: ${totalTrabaj}
+  - Trabajadores con múltiples cargos: ${datosValidos.length - totalTrabaj}`);
 
   const nuevosDetalles: CreatePlanillaAportesDetallesDto[] = datosValidos.map((row, index) => {
     try {
@@ -1996,6 +2010,7 @@ async generarReporteBajas(id_planilla: number,cod_patronal: string): Promise<Str
 } */
  
 // 20 .- Metodo para obtener los datos de la planilla por regional (se usa en la parte de resumen de planilla para mostrar al empleador y administrador) 
+
 async obtenerDatosPlanillaPorRegional(id_planilla: number): Promise<any> {
   try {
     console.log('🔍 Obteniendo planilla y detalles para id_planilla:', id_planilla);
@@ -2004,7 +2019,7 @@ async obtenerDatosPlanillaPorRegional(id_planilla: number): Promise<any> {
     console.log('✅ Planilla obtenida:', resultadoPlanilla.planilla);
 
     const detallesPlanilla = await this.obtenerDetalles(id_planilla, 1, 0);
-    console.log('👥 Trabajadores obtenidos:', detallesPlanilla.trabajadores.length);
+    console.log('👥 Registros obtenidos:', detallesPlanilla.trabajadores.length);
 
     if (!detallesPlanilla.trabajadores.length) {
       throw new Error('No se encontraron trabajadores para los datos de la planilla.');
@@ -2023,14 +2038,51 @@ async obtenerDatosPlanillaPorRegional(id_planilla: number): Promise<any> {
     const tasaCotizacion = tipoEmpresa === 'PA' ? 0.03 : 0.10;
     console.log('📊 Tasa de cotización usada:', tasaCotizacion);
 
+    // 🔄 CONSOLIDAR TRABAJADORES POR CI ANTES DE AGRUPAR POR REGIONAL
+    const trabajadoresConsolidadosMap = new Map();
+    
+    detallesPlanilla.trabajadores.forEach((trabajador) => {
+      const ci = trabajador.ci;
+      
+      if (trabajadoresConsolidadosMap.has(ci)) {
+        // Consolidar salarios del mismo trabajador
+        const existente = trabajadoresConsolidadosMap.get(ci);
+        existente.salario += parseFloat(trabajador.salario.toString());
+        
+        // Concatenar cargos si son diferentes
+        const cargosExistentes = existente.cargo.split(' / ');
+        if (!cargosExistentes.includes(trabajador.cargo)) {
+          existente.cargo += ` / ${trabajador.cargo}`;
+        }
+        
+        // Mantener la regional (asumiendo que no cambia para el mismo trabajador)
+        // Si hay diferencias, tomar la primera
+        
+      } else {
+        // Primera aparición del trabajador
+        trabajadoresConsolidadosMap.set(ci, {
+          ...trabajador,
+          salario: parseFloat(trabajador.salario.toString())
+        });
+      }
+    });
+
+    const trabajadoresConsolidados = Array.from(trabajadoresConsolidadosMap.values());
+    
+    console.log(`🔄 Consolidación completada:
+      - Registros originales: ${detallesPlanilla.trabajadores.length}
+      - Trabajadores únicos: ${trabajadoresConsolidados.length}
+      - Trabajadores con múltiples cargos: ${detallesPlanilla.trabajadores.length - trabajadoresConsolidados.length}`);
+
     // Variables para resumen
     let totalCantidad = 0;
     let totalGanado = 0;
     const regionalesMap = new Map();
 
-    detallesPlanilla.trabajadores.forEach((trabajador) => {
+    // PROCESAR TRABAJADORES CONSOLIDADOS
+    trabajadoresConsolidados.forEach((trabajador) => {
       const { regional, salario } = trabajador;
-      const salarioNum = parseFloat(salario.toString());
+      const salarioNum = salario; // Ya está convertido a número
 
       if (!regionalesMap.has(regional)) {
         regionalesMap.set(regional, {
@@ -2042,19 +2094,20 @@ async obtenerDatosPlanillaPorRegional(id_planilla: number): Promise<any> {
       }
 
       const regionData = regionalesMap.get(regional);
-      regionData.cantidad += 1;
+      regionData.cantidad += 1; // ← AHORA CUENTA TRABAJADORES ÚNICOS
       regionData.total_ganado += salarioNum;
       regionData.cotizacion = parseFloat((regionData.total_ganado * tasaCotizacion).toFixed(2));
 
-      totalCantidad += 1;
+      totalCantidad += 1; // ← AHORA CUENTA TRABAJADORES ÚNICOS
       totalGanado += salarioNum;
     });
 
     const resumenArray = Array.from(regionalesMap.values());
 
-    console.log('📋 Resumen por regional:', resumenArray);
-    console.log('📦 Totales generales antes de formatear:', {
-      cantidad_total: totalCantidad,
+    console.log('📋 Resumen por regional (trabajadores únicos):', resumenArray);
+    console.log('📦 Totales generales:', {
+      trabajadores_unicos: totalCantidad,
+      registros_originales: detallesPlanilla.trabajadores.length,
       total_ganado: totalGanado,
       cotizacion: totalGanado * tasaCotizacion,
     });
@@ -2077,18 +2130,20 @@ async obtenerDatosPlanillaPorRegional(id_planilla: number): Promise<any> {
       cotizacion: formatNumber(totalGanado * tasaCotizacion)
     };
 
-    console.log('✅ Resumen formateado:', formattedResumen);
-    console.log('✅ Totales formateados:', formattedTotales);
-
     return {
-      mensaje: 'Detalles obtenidos con éxito',
-      planilla,
+      mensaje: 'Detalles obtenidos con éxito (consolidados por CI)',
+      planilla: planilla,
       resumen: formattedResumen,
-      totales: formattedTotales
+      totales: formattedTotales,
+      // Información adicional para debugging
+      metadata: {
+        registros_originales: detallesPlanilla.trabajadores.length,
+        trabajadores_unicos: totalCantidad,
+        trabajadores_con_multiples_cargos: detallesPlanilla.trabajadores.length - totalCantidad
+      }
     };
 
   } catch (error) {
-    console.error('❌ Error en obtenerDatosPlanillaPorRegional:', error.message);
     throw new Error('Error en obtenerDatosPlanillaPorRegional: ' + error.message);
   }
 }
@@ -2106,6 +2161,10 @@ async actualizarFechaPago(idPlanilla: number, fechaPago: Date): Promise<void> {
   planilla.fecha_pago = fechaPago;
   await this.planillaRepo.save(planilla);
 }
+//** LIQUIDACIONES */
+//***************** */
+
+
 // 22.-  Función para consultar la API del Banco Central y obtener el UFV de una fecha específica -------------------------------------------------------------------------------------------------------
 async getUfvForDate(fecha: Date): Promise<number> {
   // Normalizar la fecha para evitar problemas de zona horaria
@@ -2405,6 +2464,45 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
     if (new Date(fechaDeclaradaBolivia) <= ultimoDiaMesSiguiente) {
       multaNoPresentacion = 0;
       console.log('No se aplica multa por no presentación, fecha declarada dentro del plazo oficial');
+    } else {
+      // NUEVA VALIDACIÓN: Si es planilla adicional, verificar si la planilla mensual se presentó a tiempo
+      if (planilla.tipo_planilla === 'Planilla Adicional' || planilla.tipo_planilla === 'planilla_adicional') {
+        console.log('Es planilla adicional, verificando planilla mensual...');
+        
+        let planillaMensual = null;
+        
+        // Buscar planilla mensual por id_planilla_origen o por código patronal, mes y gestión
+        if (planilla.id_planilla_origen) {
+          planillaMensual = await this.planillaRepo.findOne({
+            where: { id_planilla_aportes: planilla.id_planilla_origen }
+          });
+        } else {
+          // Buscar por código patronal, mes, gestión y tipo mensual
+          planillaMensual = await this.planillaRepo.findOne({
+            where: {
+              cod_patronal: planilla.cod_patronal,
+              mes: planilla.mes,
+              gestion: planilla.gestion,
+              tipo_planilla: 'Mensual'
+            }
+          });
+        }
+        
+        if (planillaMensual && planillaMensual.fecha_declarada) {
+          // Verificar si la planilla mensual se presentó a tiempo
+          const fechaDeclaradaMensual = new Date(planillaMensual.fecha_declarada);
+          fechaDeclaradaMensual.setHours(0, 0, 0, 0);
+          
+          if (fechaDeclaradaMensual <= ultimoDiaMesSiguiente) {
+            multaNoPresentacion = 0;
+            console.log('No se aplica multa por no presentación: planilla mensual se presentó a tiempo');
+          } else {
+            console.log('Se mantiene multa por no presentación: planilla mensual también se presentó fuera de plazo');
+          }
+        } else {
+          console.log('No se encontró planilla mensual relacionada o no tiene fecha declarada');
+        }
+      }
     }
 
     // ✅ Días de retraso
@@ -2613,6 +2711,8 @@ async recalcularLiquidacion(idPlanilla: number, forzar: boolean = false): Promis
     throw new BadRequestException(`Error al recalcular liquidación: ${error.message}`);
   }
 }
+
+
 
 
 
