@@ -137,6 +137,9 @@ export class PlanillasAporte {
   @Column({ nullable: true })
   id_planilla_origen?: number;
 
+  @Column({ type: 'decimal', precision: 15, scale: 6, nullable: true })
+  cotizacion_tasa_real?: number; // Monto real desembolsado por TGN (solo empresas públicas)
+
   @OneToMany(() => PagoAporte, (pago) => pago.planilla)
   pagos: PagoAporte[];
 

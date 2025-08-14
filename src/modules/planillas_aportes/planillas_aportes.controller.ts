@@ -743,13 +743,91 @@ async actualizarEstadoPlanilla(
     return await this.planillasAportesService.obtenerLiquidacion(id);
   }
 
-  @Post(':id/recalcular-liquidacion')
-  async recalcularLiquidacion(
-    @Param('id') id: number,
-    @Body('forzar') forzar: boolean = false
-  ) {
-    return await this.planillasAportesService.recalcularLiquidacion(id, forzar);
+  // recalcular liquidacion
+
+@Post(':id/recalcular-liquidacion')
+@ApiOperation({ summary: 'Recalcular liquidación con opción de actualizar fecha de pago y cotización real' })
+@ApiParam({
+  name: 'id',
+  required: true,
+  description: 'ID de la planilla de aportes',
+  type: Number,
+})
+@ApiBody({
+  description: 'Datos opcionales para recalcular la liquidación',
+  schema: {
+    type: 'object',
+    properties: {
+      forzar: { 
+        type: 'boolean', 
+        description: 'Forzar recálculo aunque ya exista liquidación',
+        default: false 
+      },
+      nueva_fecha_pago: { 
+        type: 'string', 
+        format: 'date-time', 
+        description: 'Nueva fecha de pago (opcional)',
+        example: '2024-12-25T17:03:00.000Z' 
+      },
+      cotizacion_real: { 
+        type: 'number', 
+        description: 'Monto real desembolsado por TGN (solo empresas públicas)',
+        example: 258699.00 
+      }
+    },
+  },
+})
+@ApiResponse({ 
+  status: 200, 
+  description: 'Liquidación recalculada correctamente' 
+})
+@ApiResponse({ 
+  status: 400, 
+  description: 'Solicitud inválida o planilla no encontrada' 
+})
+async recalcularLiquidacion(
+  @Param('id') id: number,
+  @Body() body: { 
+    forzar?: boolean; 
+    nueva_fecha_pago?: string; 
+    cotizacion_real?: number; 
   }
+) {
+  try {
+    const { forzar = false, nueva_fecha_pago, cotizacion_real } = body;
+    
+    // Convertir fecha si se proporciona
+    let nuevaFechaPago: Date | undefined;
+    if (nueva_fecha_pago) {
+      nuevaFechaPago = new Date(nueva_fecha_pago);
+      if (isNaN(nuevaFechaPago.getTime())) {
+        throw new BadRequestException('Fecha de pago inválida');
+      }
+    }
+
+    // Validar cotización real si se proporciona
+    if (cotizacion_real !== undefined && cotizacion_real <= 0) {
+      throw new BadRequestException('La cotización real debe ser mayor a 0');
+    }
+
+    return await this.planillasAportesService.recalcularLiquidacion(
+      id, 
+      forzar, 
+      nuevaFechaPago, 
+      cotizacion_real
+    );
+  } catch (error) {
+    throw new HttpException(
+      {
+        status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message || 'Error al recalcular la liquidación',
+      },
+      error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+}
+
+// recalcular liquidacion con fecha especifica
 
   @Post(':id/recalcular-liquidacion-fecha')
 async recalcularLiquidacionConFecha(

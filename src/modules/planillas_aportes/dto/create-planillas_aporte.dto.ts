@@ -157,7 +157,7 @@ export class CreatePlanillasAporteDto {
 
   @IsString()
   @IsOptional()
-  tipo?: 'mensual' | 'planilla_adicional';
+  tipo?: 'mensual' | 'planilla_adicional ' | 'retroactivo';
 
 
 }
