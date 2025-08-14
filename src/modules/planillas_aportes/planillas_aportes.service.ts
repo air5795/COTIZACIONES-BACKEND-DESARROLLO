@@ -3001,6 +3001,7 @@ async obtenerLiquidacion(idPlanilla: number): Promise<any> {
         valido_cotizacion: planilla.valido_cotizacion,
         fecha_validacion: planilla.fecha_liquidacion,
         cotizacion_tasa_real: planilla.cotizacion_tasa_real,
+
         esta_validada: !!(planilla.fecha_liquidacion && planilla.valido_cotizacion),
       };
     }
