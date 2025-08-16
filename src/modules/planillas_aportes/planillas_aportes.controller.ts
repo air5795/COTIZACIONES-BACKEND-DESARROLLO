@@ -737,118 +737,175 @@ async actualizarEstadoPlanilla(
    }
  }
 
- // nuevos controladores paara la liquidacion
-  @Get(':id/liquidacion')
-  async obtenerLiquidacion(@Param('id') id: number) {
-    return await this.planillasAportesService.obtenerLiquidacion(id);
-  }
+ // ! nuevos controladores paara la liquidacion ------------------------------------------------------------------------
 
-  // recalcular liquidacion
+ /* =========================================================================== */
+/* CONTROLADORES ESPECÍFICOS PARA EMPRESAS PRIVADAS                          */
+/* =========================================================================== */
 
-@Post(':id/recalcular-liquidacion')
-@ApiOperation({ summary: 'Recalcular liquidación con opción de actualizar fecha de pago y cotización real' })
-@ApiParam({
-  name: 'id',
-  required: true,
-  description: 'ID de la planilla de aportes',
-  type: Number,
-})
+// 🏢 EMPRESAS PRIVADAS: Recalcular liquidación con nueva fecha
+@Post('privada/:id/recalcular-fecha')
+@ApiOperation({ summary: 'Recalcular liquidación para empresa privada con nueva fecha' })
+@ApiParam({ name: 'id', description: 'ID de la planilla', type: Number })
 @ApiBody({
-  description: 'Datos opcionales para recalcular la liquidación',
+  description: 'Nueva fecha de pago',
   schema: {
     type: 'object',
     properties: {
-      forzar: { 
-        type: 'boolean', 
-        description: 'Forzar recálculo aunque ya exista liquidación',
-        default: false 
-      },
-      nueva_fecha_pago: { 
-        type: 'string', 
-        format: 'date-time', 
-        description: 'Nueva fecha de pago (opcional)',
-        example: '2024-12-25T17:03:00.000Z' 
-      },
-      cotizacion_real: { 
-        type: 'number', 
-        description: 'Monto real desembolsado por TGN (solo empresas públicas)',
-        example: 258699.00 
-      }
+      fechaPago: { type: 'string', format: 'date-time', description: 'Nueva fecha de pago' }
     },
-  },
-})
-@ApiResponse({ 
-  status: 200, 
-  description: 'Liquidación recalculada correctamente' 
-})
-@ApiResponse({ 
-  status: 400, 
-  description: 'Solicitud inválida o planilla no encontrada' 
-})
-async recalcularLiquidacion(
-  @Param('id') id: number,
-  @Body() body: { 
-    forzar?: boolean; 
-    nueva_fecha_pago?: string; 
-    cotizacion_real?: number; 
+    required: ['fechaPago']
   }
+})
+@ApiResponse({ status: 200, description: 'Liquidación recalculada para empresa privada' })
+@ApiResponse({ status: 400, description: 'Error en la solicitud' })
+async recalcularLiquidacionPrivada(
+  @Param('id') id: number,
+  @Body() body: { fechaPago: string }
 ) {
   try {
-    const { forzar = false, nueva_fecha_pago, cotizacion_real } = body;
+    const fechaPago = new Date(body.fechaPago);
     
-    // Convertir fecha si se proporciona
-    let nuevaFechaPago: Date | undefined;
-    if (nueva_fecha_pago) {
-      nuevaFechaPago = new Date(nueva_fecha_pago);
-      if (isNaN(nuevaFechaPago.getTime())) {
-        throw new BadRequestException('Fecha de pago inválida');
-      }
+    if (isNaN(fechaPago.getTime())) {
+      throw new BadRequestException('Fecha de pago inválida');
     }
 
-    // Validar cotización real si se proporciona
-    if (cotizacion_real !== undefined && cotizacion_real <= 0) {
-      throw new BadRequestException('La cotización real debe ser mayor a 0');
-    }
-
-    return await this.planillasAportesService.recalcularLiquidacion(
-      id, 
-      forzar, 
-      nuevaFechaPago, 
-      cotizacion_real
-    );
+    console.log('🏢 Controller: Recalculando liquidación empresa PRIVADA');
+    
+    const resultado = await this.planillasAportesService.recalcularLiquidacionPrivada(id, fechaPago);
+    
+    return {
+      mensaje: 'Liquidación de empresa privada recalculada exitosamente',
+      ...resultado
+    };
   } catch (error) {
     throw new HttpException(
       {
         status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-        error: error.message || 'Error al recalcular la liquidación',
+        error: error.message || 'Error al recalcular liquidación de empresa privada',
       },
       error.status || HttpStatus.INTERNAL_SERVER_ERROR,
     );
   }
 }
 
-// recalcular liquidacion con fecha especifica
+/* =========================================================================== */
+/* CONTROLADORES ESPECÍFICOS PARA EMPRESAS PÚBLICAS                          */
+/* =========================================================================== */
 
-  @Post(':id/recalcular-liquidacion-fecha')
-async recalcularLiquidacionConFecha(
+// 🏛️ EMPRESAS PÚBLICAS: Actualizar con nuevo monto TGN real
+@Post('publica/:id/actualizar-tgn')
+@ApiOperation({ summary: 'Actualizar empresa pública con nuevo monto TGN real' })
+@ApiParam({ name: 'id', description: 'ID de la planilla', type: Number })
+@ApiBody({
+  description: 'Nueva fecha de pago y monto TGN real',
+  schema: {
+    type: 'object',
+    properties: {
+      fechaPago: { type: 'string', format: 'date-time', description: 'Fecha real de pago' },
+      nuevoMontoTGN: { type: 'number', description: 'Monto TGN real pagado' }
+    },
+    required: ['fechaPago', 'nuevoMontoTGN']
+  }
+})
+@ApiResponse({ status: 200, description: 'Empresa pública actualizada con nuevo TGN' })
+@ApiResponse({ status: 400, description: 'Error en la solicitud' })
+async actualizarEmpresaPublicaConTGN(
   @Param('id') id: number,
-  @Body() body: { fechaPago: string; forzar: boolean }
+  @Body() body: { fechaPago: string; nuevoMontoTGN: number }
 ) {
-  const fechaPago = new Date(body.fechaPago);
-  
-  // Primero obtener los datos de preliquidación con la nueva fecha
-  const datosLiquidacion = await this.planillasAportesService.calcularAportesPreliminar(id, fechaPago);
-  
-  // Actualizar la planilla con todos los datos calculados
-  await this.planillasAportesService.actualizarPlanillaConLiquidacion(id, fechaPago, datosLiquidacion);
-  
-  // Retornar los datos actualizados
+  try {
+    const fechaPago = new Date(body.fechaPago);
+    const nuevoMontoTGN = body.nuevoMontoTGN;
+    
+    if (isNaN(fechaPago.getTime())) {
+      throw new BadRequestException('Fecha de pago inválida');
+    }
+    
+    if (!nuevoMontoTGN || nuevoMontoTGN <= 0) {
+      throw new BadRequestException('El monto TGN debe ser mayor a 0');
+    }
+
+    console.log('🏛️ Controller: Actualizando empresa PÚBLICA con nuevo TGN:', nuevoMontoTGN);
+    
+    const resultado = await this.planillasAportesService.actualizarConNuevoMontoTGN(id, fechaPago, nuevoMontoTGN);
+    
+    const valorAnterior = resultado.cotizacion_teorica || 0;
+    
+    return {
+      mensaje: "Liquidación recalculada con cotización real del TGN",
+      cotizacion_teorica: valorAnterior.toString(),
+      cotizacion_real: resultado.aporte_porcentaje,
+      diferencia: resultado.aporte_porcentaje - valorAnterior,
+      ...resultado
+    };
+  } catch (error) {
+    throw new HttpException(
+      {
+        status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message || 'Error al actualizar empresa pública con nuevo TGN',
+      },
+      error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+}
+
+// 🏛️ EMPRESAS PÚBLICAS: Recalcular liquidación normal (sin nuevo TGN)
+@Post('publica/:id/recalcular-fecha')
+@ApiOperation({ summary: 'Recalcular liquidación para empresa pública con nueva fecha (sin nuevo TGN)' })
+@ApiParam({ name: 'id', description: 'ID de la planilla', type: Number })
+@ApiBody({
+  description: 'Nueva fecha de pago',
+  schema: {
+    type: 'object',
+    properties: {
+      fechaPago: { type: 'string', format: 'date-time', description: 'Nueva fecha de pago' }
+    },
+    required: ['fechaPago']
+  }
+})
+@ApiResponse({ status: 200, description: 'Liquidación recalculada para empresa pública' })
+@ApiResponse({ status: 400, description: 'Error en la solicitud' })
+async recalcularLiquidacionPublica(
+  @Param('id') id: number,
+  @Body() body: { fechaPago: string }
+) {
+  try {
+    const fechaPago = new Date(body.fechaPago);
+    
+    if (isNaN(fechaPago.getTime())) {
+      throw new BadRequestException('Fecha de pago inválida');
+    }
+
+    console.log('🏛️ Controller: Recalculando liquidación empresa PÚBLICA sin nuevo TGN');
+    
+    const resultado = await this.planillasAportesService.recalcularLiquidacionPublica(id, fechaPago);
+    
+    return {
+      mensaje: 'Liquidación de empresa pública recalculada exitosamente',
+      ...resultado
+    };
+  } catch (error) {
+    throw new HttpException(
+      {
+        status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message || 'Error al recalcular liquidación de empresa pública',
+      },
+      error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+}
+
+
+@Get(':id/liquidacion')
+async obtenerLiquidacion(@Param('id') id: number) {
   return await this.planillasAportesService.obtenerLiquidacion(id);
 }
 
 
 
 
+//!---------------------------------------------------------------------------------------------------------------------------
  // 25.-  reporte
 
  @Get('reporte-aportes/:id_planilla')

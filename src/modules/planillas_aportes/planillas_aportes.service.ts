@@ -2163,7 +2163,7 @@ async actualizarFechaPago(idPlanilla: number, fechaPago: Date): Promise<void> {
 //***************** */
 
 
-// 22.-  Función para consultar la API del Banco Central y obtener el UFV de una fecha específica -------------------------------------------------------------------------------------------------------
+//! 22.-  Función para consultar la API del Banco Central y obtener el UFV de una fecha específica -------------------------------------------------------------------------------------------------------
 async getUfvForDate(fecha: Date): Promise<number> {
   // Normalizar la fecha para evitar problemas de zona horaria
   const year = fecha.getUTCFullYear();
@@ -2211,6 +2211,7 @@ async getUfvForDate(fecha: Date): Promise<number> {
    * - Marzo → mes siguiente = abril (30 días) → 30 de abril
    * - Abril → mes siguiente = mayo (31 días) → 30 de mayo
    */
+// ! - calcularFechaLimiteDeclaracion
   private calcularFechaLimiteDeclaracion(fechaPlanilla: Date): Date {
     const fecha = new Date(fechaPlanilla);
     fecha.setUTCHours(0, 0, 0, 0);
@@ -2255,6 +2256,7 @@ async getUfvForDate(fecha: Date): Promise<number> {
   /**
    * Verifica si una fecha de declaración está dentro del plazo oficial
    */
+// ! - estaEnPlazoOficial
   private estaEnPlazoOficial(fechaPlanilla: Date, fechaDeclarada: Date): boolean {
     const fechaLimite = this.calcularFechaLimiteDeclaracion(fechaPlanilla);
     
@@ -2271,6 +2273,7 @@ async getUfvForDate(fecha: Date): Promise<number> {
    * Calcula la multa por no presentación según las nuevas reglas de fechas
    * Incluye validación especial para planillas adicionales
    */
+// ! - calcularMultaNoPresentacion
   private async calcularMultaNoPresentacion(
     planilla: any, // Planilla completa para acceder a tipo_planilla y otros datos
     fechaPlanilla: Date, 
@@ -2549,7 +2552,8 @@ private async calcularAportesConMontoAjustado(idPlanilla: number, cotizacionReal
   }
 }
 
-// NUEVA FUNCIÓN: Calcular fecha límite para días de retraso (diferente a multa)
+
+//! NUEVA FUNCIÓN: Calcular fecha límite para días de retraso (diferente a multa)
 private calcularFechaLimiteParaDiasRetraso(fechaPlanilla: Date): Date {
   const fecha = new Date(fechaPlanilla);
   fecha.setUTCHours(0, 0, 0, 0);
@@ -2572,7 +2576,7 @@ private calcularFechaLimiteParaDiasRetraso(fechaPlanilla: Date): Date {
 }
 
 
-// 23 .- Función para calcular los aportes  -------------------------------------------------------------------------------------------------------
+//! 23 .- Función para calcular los aportes  -------------------------------------------------------------------------------------------------------
 async calcularAportes(idPlanilla: number): Promise<any> {
   try {
     if (!idPlanilla || idPlanilla < 1) {
@@ -2685,7 +2689,7 @@ async calcularAportes(idPlanilla: number): Promise<any> {
 
     let totalDeducciones = 0;
     let descuentoMinSalud = 0;
-    if (planilla.aplica_descuento_min_salud) {
+    if (tipo === 'PA') {
       descuentoMinSalud = aportePorcentaje * 0.05;
       totalDeducciones += descuentoMinSalud;
     }
@@ -2744,7 +2748,7 @@ async calcularAportes(idPlanilla: number): Promise<any> {
     throw new BadRequestException(`Error al calcular los aportes: ${error.message}`);
   }
 }
-// 24 .- calcular aportes con fecha pago -------------------------------------------------------------------------------------------------------
+//! 24 .- calcular aportes con fecha pago -------------------------------------------------------------------------------------------------------
 async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): Promise<any> {
   try {
     if (!idPlanilla || idPlanilla < 1) {
@@ -2778,11 +2782,25 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
 
     // ✅ FECHA DE PRESENTACIÓN OFICIAL: Primer día del tercer mes desde fecha_planilla
     const getFechaPresentacionOficial = (fechaPlanilla: Date): Date => {
-      return moment(fechaPlanilla)
-        .tz('America/La_Paz')
-        .add(3, 'months') // Recorre 2 meses
-        .startOf('month') // Primer día de ese mes
-        .toDate();
+      // 🔍 LOGS DE DEBUG - AGREGAR ESTOS
+      console.log('🔍 DEBUG Fecha Presentación Oficial:');
+      console.log('📅 Fecha planilla original:', fechaPlanilla);
+      console.log('📅 Fecha planilla Bolivia:', fechaPlanillaBolivia);
+      
+      const fechaInicial = moment(fechaPlanilla).tz('America/La_Paz');
+      console.log('📅 Moment inicial:', fechaInicial.format('YYYY-MM-DD'));
+      
+      const fechaConMeses = fechaInicial.add(3, 'months');
+      console.log('➕ Después de agregar 3 meses:', fechaConMeses.format('YYYY-MM-DD'));
+      
+      const fechaFinal = fechaConMeses.startOf('month');
+      console.log('📅 Primer día del mes:', fechaFinal.format('YYYY-MM-DD'));
+      
+      const resultado = fechaFinal.toDate();
+      console.log('📅 Resultado final:', resultado);
+      console.log('-----------------------------------');
+      
+      return resultado;
     };
 
     const fechaPresentacionOficial = getFechaPresentacionOficial(fechaPlanillaBolivia);
@@ -2913,6 +2931,7 @@ async calcularAportesPreliminar(idPlanilla: number, fechaPagoPropuesta: Date): P
     throw new BadRequestException(`Error al calcular los aportes preliminares: ${error.message}`);
   }
 }
+//?! -- Actualizar planilla con liquidación calculada ---------------------------------------------------
 async actualizarPlanillaConLiquidacion(idPlanilla: number, fechaPago: Date, datosLiquidacion: any): Promise<void> {
   try {
     const planilla = await this.planillaRepo.findOne({
@@ -2953,7 +2972,121 @@ async actualizarPlanillaConLiquidacion(idPlanilla: number, fechaPago: Date, dato
     throw new BadRequestException(`Error al actualizar planilla con liquidación: ${error.message}`);
   }
 }
+//! 29 .- VALIDAR LIQUIDACIONES
+async validarLiquidacion(idPlanilla: number, payload: { fecha_pago?: string; valido_cotizacion?: string }): Promise<any> {
+  const planilla = await this.planillaRepo.findOne({ 
+    where: { id_planilla_aportes: idPlanilla },
+    relations: ['empresa'] // Por si necesitas datos de la empresa
+  });
+
+  if (!planilla) {
+    throw new NotFoundException('La planilla no existe.');
+  }
+
+  // NUEVA VALIDACIÓN: Verificar si ya está validada
+  if (planilla.fecha_liquidacion && planilla.valido_cotizacion) {
+    return {
+      mensaje: 'La liquidación ya está validada.',
+      planilla: planilla,
+      validado_por: planilla.valido_cotizacion,
+      fecha_validacion: planilla.fecha_liquidacion,
+      ya_validada: true
+    };
+  }
+
+  // Actualizar fecha_pago solo si se proporciona
+  if (payload.fecha_pago) {
+    const parsedFechaPago = new Date(payload.fecha_pago);
+    if (isNaN(parsedFechaPago.getTime())) {
+      throw new BadRequestException('La fecha de pago proporcionada no es válida.');
+    }
+    planilla.fecha_pago = parsedFechaPago;
+  }
+
+  // Siempre actualizar fecha_liquidacion
+  planilla.fecha_liquidacion = new Date();
+
+  // ACTUALIZAR el nombre del validador (siempre requerido para validaciones)
+  planilla.valido_cotizacion = payload.valido_cotizacion || 'Administrador';
+
+  // AGREGAR LOG para debug
+  console.log(`💚 Validando liquidación ${idPlanilla} por: ${planilla.valido_cotizacion}`);
+
+  // Guardar los cambios
+  const planillaActualizada = await this.planillaRepo.save(planilla);
+
+  return {
+    mensaje: 'Liquidación validada correctamente.',
+    planilla: planillaActualizada,
+    validado_por: planilla.valido_cotizacion,
+    fecha_validacion: planilla.fecha_liquidacion,
+    ya_validada: false
+  };
+}
+
+//? helpers
+private formatearRespuestaLiquidacion(planilla: any): any {
+  return {
+    total_importe: planilla.total_importe,
+    aporte_porcentaje: planilla.aporte_porcentaje,
+    cotizacion_tasa: planilla.cotizacion_tasa,
+    ufv_dia_formal: planilla.ufv_dia_formal,
+    ufv_dia_presentacion: planilla.ufv_dia_presentacion,
+    fecha_declarada: planilla.fecha_declarada,
+    fecha_pago: planilla.fecha_pago,
+    fecha_liquidacion: planilla.fecha_liquidacion,
+    aporte_actualizado: planilla.aporte_actualizado,
+    monto_actualizado: planilla.monto_actualizado,
+    multa_no_presentacion: planilla.multa_no_presentacion,
+    dias_retraso: planilla.dias_retraso,
+    intereses: planilla.intereses,
+    multa_sobre_intereses: planilla.multa_sobre_intereses,
+    total_a_cancelar_parcial: planilla.total_a_cancelar_parcial,
+    total_multas: planilla.total_multas,
+    total_tasa_interes: planilla.total_tasa_interes,
+    total_deducciones: planilla.total_deducciones,
+    descuento_min_salud: planilla.total_aportes_min_salud,
+    otros_descuentos: planilla.otros_descuentos,
+    total_a_cancelar: planilla.total_a_cancelar,
+    tipo_empresa: planilla.empresa?.tipo,
+    total_aportes_asuss: planilla.total_aportes_asuss,
+    total_aportes_min_salud: planilla.total_aportes_min_salud,
+    excedente: planilla.excedente,
+    motivo_excedente: planilla.motivo_excedente,
+    fechaFormal: planilla.fecha_presentacion_oficial,
+    fechaPagoUfv: planilla.fecha_deposito_presentacion,
+    observaciones: planilla.observaciones
+  };
+}
+//? OBTENER LIQUIDACIÓN (Dispatcher según tipo de empresa)
 async obtenerLiquidacion(idPlanilla: number): Promise<any> {
+  try {
+    // Determinar tipo de empresa
+    const planilla = await this.planillaRepo.findOne({
+      where: { id_planilla_aportes: idPlanilla },
+      relations: ['empresa'],
+    });
+
+    if (!planilla) {
+      throw new BadRequestException('Planilla no encontrada');
+    }
+
+    const tipoEmpresa = planilla.empresa?.tipo?.toUpperCase();
+    console.log('🔍 obtenerLiquidacion - Tipo empresa:', tipoEmpresa);
+
+    // Dispatcher: Decidir qué método usar según el tipo de empresa
+    if (tipoEmpresa === 'AP') {
+      return await this.obtenerLiquidacionPublica(idPlanilla);
+    } else {
+      return await this.obtenerLiquidacionPrivada(idPlanilla);
+    }
+  } catch (error) {
+    throw new BadRequestException(`Error al obtener liquidación: ${error.message}`);
+  }
+}
+//? MÉTODOS ESPECÍFICOS PARA EMPRESAS PRIVADAS (AV, PA, VA)--------------------------------------------------------------
+//? EMPRESAS PRIVADAS: Obtener liquidación (lógica original)
+async obtenerLiquidacionPrivada(idPlanilla: number): Promise<any> {
   try {
     const planilla = await this.planillaRepo.findOne({
       where: { id_planilla_aportes: idPlanilla },
@@ -2964,128 +3097,179 @@ async obtenerLiquidacion(idPlanilla: number): Promise<any> {
       throw new BadRequestException('Planilla no encontrada');
     }
 
-    // Verificar si la planilla ya tiene liquidación calculada
-    if (planilla.fecha_liquidacion && planilla.total_a_cancelar !== null) {
-      console.log(`Planilla ${idPlanilla} ya tiene liquidación calculada`);
-      
-      // Retornar los datos ya guardados
-      return {
-        total_importe: planilla.total_importe,
-        aporte_porcentaje: planilla.aporte_porcentaje,
-        cotizacion_tasa: planilla.cotizacion_tasa,
-        ufv_dia_formal: planilla.ufv_dia_formal,
-        ufv_dia_presentacion: planilla.ufv_dia_presentacion,
-        fecha_declarada: planilla.fecha_declarada,
-        fecha_pago: planilla.fecha_pago,
-        fecha_liquidacion: planilla.fecha_liquidacion,
-        aporte_actualizado: planilla.aporte_actualizado,
-        monto_actualizado: planilla.monto_actualizado,
-        multa_no_presentacion: planilla.multa_no_presentacion,
-        dias_retraso: planilla.dias_retraso,
-        intereses: planilla.intereses,
-        multa_sobre_intereses: planilla.multa_sobre_intereses,
-        total_a_cancelar_parcial: planilla.total_a_cancelar_parcial,
-        total_multas: planilla.total_multas,
-        total_tasa_interes: planilla.total_tasa_interes,
-        total_deducciones: planilla.total_deducciones,
-        descuento_min_salud: planilla.total_aportes_min_salud,
-        otros_descuentos: planilla.otros_descuentos,
-        total_a_cancelar: planilla.total_a_cancelar,
-        tipo_empresa: planilla.empresa?.tipo,
-        total_aportes_asuss: planilla.total_aportes_asuss,
-        total_aportes_min_salud: planilla.total_aportes_min_salud,
-        excedente: planilla.excedente,
-        motivo_excedente: planilla.motivo_excedente,
-        fechaFormal: planilla.fecha_presentacion_oficial,
-        fechaPagoUfv: planilla.fecha_deposito_presentacion,
-        valido_cotizacion: planilla.valido_cotizacion,
-        fecha_validacion: planilla.fecha_liquidacion,
-        cotizacion_tasa_real: planilla.cotizacion_tasa_real,
+    console.log('🏢 Obteniendo liquidación EMPRESA PRIVADA:', planilla.empresa?.tipo);
 
-        esta_validada: !!(planilla.fecha_liquidacion && planilla.valido_cotizacion),
-      };
+    // Si ya tiene liquidación calculada, retornar datos guardados
+    if (planilla.fecha_liquidacion && planilla.total_a_cancelar !== null) {
+      console.log('✅ Empresa privada - Datos desde BD');
+      return this.formatearRespuestaLiquidacion(planilla);
     }
 
-    // Si no tiene liquidación y tiene fecha_pago, calcularla
+    // Si tiene fecha_pago pero no liquidación, calcular usando método original
     if (planilla.fecha_pago) {
-      console.log(`Calculando liquidación para planilla ${idPlanilla}`);
+      console.log('🔄 Empresa privada - Calculando con método original');
       return await this.calcularAportes(idPlanilla);
     }
 
-    // Si no tiene ni liquidación ni fecha_pago
-    throw new BadRequestException('La planilla no tiene fecha de pago ni liquidación calculada (EMPRESA NO REGISTRO EL PAGO)');
+    throw new BadRequestException('La planilla no tiene fecha de pago ni liquidación calculada');
   } catch (error) {
-    throw new BadRequestException(`Error al obtener liquidación: ${error.message}`);
+    throw new BadRequestException(`Error al obtener liquidación privada: ${error.message}`);
   }
 }
-async recalcularLiquidacion(idPlanilla: number, forzar: boolean = false, nuevaFechaPago?: Date, cotizacionReal?: number): Promise<any> {
+async recalcularLiquidacionPrivada(idPlanilla: number, fechaPago: Date): Promise<any> {
+  try {
+    console.log('🏢 Recalculando liquidación EMPRESA PRIVADA con nueva fecha:', fechaPago);
+
+    // Usar el método preliminar original
+    const datosLiquidacion = await this.calcularAportesPreliminar(idPlanilla, fechaPago);
+    
+    // Actualizar planilla con los datos calculados usando método original
+    await this.actualizarPlanillaConLiquidacion(idPlanilla, fechaPago, datosLiquidacion);
+    
+    console.log('✅ Liquidación empresa privada recalculada');
+    return datosLiquidacion;
+  } catch (error) {
+    throw new BadRequestException(`Error al recalcular liquidación privada: ${error.message}`);
+  }
+}
+
+//? MÉTODOS ESPECÍFICOS PARA EMPRESAS PÚBLICAS (AP)  ---------------------------------------------------------------------
+//? EMPRESAS PÚBLICAS: Obtener liquidación (lógica nueva con preliminares)
+async obtenerLiquidacionPublica(idPlanilla: number): Promise<any> {
   try {
     const planilla = await this.planillaRepo.findOne({
       where: { id_planilla_aportes: idPlanilla },
-      relations: ['empresa']
+      relations: ['empresa'],
     });
 
     if (!planilla) {
       throw new BadRequestException('Planilla no encontrada');
     }
 
-    if (!planilla.fecha_pago && !nuevaFechaPago) {
-      throw new BadRequestException('La planilla no tiene fecha de pago y no se proporcionó una nueva');
-    }
+    console.log('🏛️ Obteniendo liquidación EMPRESA PÚBLICA');
 
-    // Si no se fuerza y ya tiene liquidación, preguntar confirmación
-    if (!forzar && planilla.fecha_liquidacion) {
-      return {
-        mensaje: 'La planilla ya tiene una liquidación calculada',
-        fecha_liquidacion: planilla.fecha_liquidacion,
-        requiere_confirmacion: true
-      };
-    }
-
-    // Actualizar fecha de pago si se proporciona
-    if (nuevaFechaPago) {
-      planilla.fecha_pago = nuevaFechaPago;
-      console.log(`📅 Nueva fecha de pago establecida: ${nuevaFechaPago}`);
-    }
-
-    // Manejar cotización real para empresas públicas
-    if (cotizacionReal !== undefined) {
-      // Validar que sea empresa pública
-      if (planilla.empresa?.tipo !== 'AP') {
-        throw new BadRequestException('El ajuste de cotización real solo aplica para empresas públicas (AP)');
-      }
-
-      // Validar que el monto sea positivo
-      if (cotizacionReal <= 0) {
-        throw new BadRequestException('La cotización real debe ser mayor a 0');
-      }
-
-      // Guardar el monto real del TGN
-      planilla.cotizacion_tasa_real = cotizacionReal;
+    // Si ya tiene liquidación calculada, retornar datos guardados
+    if (planilla.fecha_liquidacion && planilla.total_a_cancelar !== null) {
+      console.log('✅ Empresa pública - Datos desde BD');
+      const datos = this.formatearRespuestaLiquidacion(planilla);
       
-      const cotizacionTeorica = planilla.cotizacion_tasa;
-      const diferencia = cotizacionReal - cotizacionTeorica;
+      // Verificar si es liquidación preliminar
+      if (planilla.observaciones?.includes('LIQUIDACIÓN PRELIMINAR')) {
+        datos.es_liquidacion_preliminar = true;
+      }
       
-      console.log(`💰 AJUSTE DE COTIZACIÓN PARA EMPRESA PÚBLICA:`);
-      console.log(`💰 Cotización teórica: ${cotizacionTeorica}`);
-      console.log(`💰 Cotización real TGN: ${cotizacionReal}`);
-      console.log(`💰 Diferencia: ${diferencia}`);
-
-      // Recalcular con el monto real
-      return await this.calcularAportesConMontoAjustado(idPlanilla, cotizacionReal);
+      return datos;
     }
 
-    // Guardar cambios de fecha si se actualizó
-    if (nuevaFechaPago) {
-      await this.planillaRepo.save(planilla);
+    // Si tiene fecha_pago pero no liquidación, calcular automáticamente
+    if (planilla.fecha_pago) {
+      console.log('🔄 Empresa pública - Calculando preliquidación automática');
+      const liquidacion = await this.calcularAportes(idPlanilla);
+      
+      // Marcar como liquidación preliminar para empresas públicas
+      const planillaActualizada = await this.planillaRepo.findOne({ where: { id_planilla_aportes: idPlanilla } });
+      if (planillaActualizada) {
+        planillaActualizada.observaciones = (planillaActualizada.observaciones || '') + '\nLIQUIDACIÓN PRELIMINAR - Empresa Pública';
+        await this.planillaRepo.save(planillaActualizada);
+      }
+      
+      liquidacion.es_liquidacion_preliminar = true;
+      return liquidacion;
     }
 
-    // Recalcular normalmente
-    return await this.calcularAportes(idPlanilla);
+    throw new BadRequestException('La planilla no tiene fecha de pago ni liquidación calculada');
   } catch (error) {
-    throw new BadRequestException(`Error al recalcular liquidación: ${error.message}`);
+    throw new BadRequestException(`Error al obtener liquidación pública: ${error.message}`);
   }
 }
+//? EMPRESAS PÚBLICAS: Actualizar con nuevo monto TGN real
+async actualizarConNuevoMontoTGN(idPlanilla: number, fechaPago: Date, nuevoMontoTGN: number): Promise<any> {
+  try {
+    console.log('🏛️ Actualizando EMPRESA PÚBLICA con nuevo monto TGN:', nuevoMontoTGN);
+
+    const planilla = await this.planillaRepo.findOne({
+      where: { id_planilla_aportes: idPlanilla },
+      relations: ['empresa'],
+    });
+
+    if (!planilla) {
+      throw new BadRequestException('Planilla no encontrada');
+    }
+
+    // Calcular datos base usando método preliminar
+    const datosBase = await this.calcularAportesPreliminar(idPlanilla, fechaPago);
+    
+    // SOBRESCRIBIR con el nuevo monto TGN específico
+    datosBase.aporte_porcentaje = nuevoMontoTGN;
+    datosBase.aporte_actualizado = nuevoMontoTGN;
+    
+    // Para empresas públicas SIEMPRE aplicar 5% de descuento
+    const descuentoMinSalud = nuevoMontoTGN * 0.05;
+    datosBase.descuento_min_salud = descuentoMinSalud;
+    datosBase.total_deducciones = descuentoMinSalud + (datosBase.otros_descuentos || 0);
+    
+    // Recalcular totales con el nuevo monto y descuentos
+    const multasEIntereses = (datosBase.multa_no_presentacion || 0) + 
+                            (datosBase.intereses || 0) + 
+                            (datosBase.multa_sobre_intereses || 0);
+    
+    datosBase.total_a_cancelar_parcial = nuevoMontoTGN + multasEIntereses;
+    datosBase.total_a_cancelar = datosBase.total_a_cancelar_parcial - datosBase.total_deducciones;
+    datosBase.total_aportes_asuss = nuevoMontoTGN * 0.005;
+    
+    // Guardar en base de datos usando método existente
+    await this.actualizarPlanillaConLiquidacion(idPlanilla, fechaPago, datosBase);
+    
+    // Actualizar observaciones específicas para TGN real
+    const planillaActualizada = await this.planillaRepo.findOne({ where: { id_planilla_aportes: idPlanilla } });
+    if (planillaActualizada) {
+      planillaActualizada.observaciones = 'LIQUIDACIÓN REAL - TGN ACTUALIZADO';
+      planillaActualizada.aplica_descuento_min_salud = true; // Asegurar que aplique el 5%
+      await this.planillaRepo.save(planillaActualizada);
+    }
+    
+    console.log('✅ Empresa pública actualizada con nuevo TGN:', nuevoMontoTGN);
+    console.log('💊 Descuento 5% aplicado:', descuentoMinSalud);
+    
+    return datosBase;
+  } catch (error) {
+    throw new BadRequestException(`Error al actualizar empresa pública con nuevo TGN: ${error.message}`);
+  }
+}
+//? EMPRESAS PÚBLICAS: Recalcular liquidación normal (sin nuevo TGN)
+async recalcularLiquidacionPublica(idPlanilla: number, fechaPago: Date): Promise<any> {
+  try {
+    console.log('🏛️ Recalculando liquidación EMPRESA PÚBLICA (sin nuevo TGN)');
+    
+    // Usar método original pero marcar como liquidación real
+    const datosLiquidacion = await this.calcularAportesPreliminar(idPlanilla, fechaPago);
+    await this.actualizarPlanillaConLiquidacion(idPlanilla, fechaPago, datosLiquidacion);
+    
+    // Actualizar observaciones para quitar "preliminar"
+    const planilla = await this.planillaRepo.findOne({ where: { id_planilla_aportes: idPlanilla } });
+    if (planilla) {
+      planilla.observaciones = 'LIQUIDACIÓN REAL - Empresa Pública';
+      await this.planillaRepo.save(planilla);
+    }
+    
+    return datosLiquidacion;
+  } catch (error) {
+    throw new BadRequestException(`Error al recalcular liquidación pública: ${error.message}`);
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 //* 25 .- REPORTE FORMULARIO DS-08 (NOMBRE EN FRONT : FORMULARIO DS-08)
@@ -3305,7 +3489,7 @@ async generarReportePlanillaPorRegional(idPlanilla: number): Promise<StreamableF
   }
 }
 
-//! 27 .- REPORTE DE APORTES RECIBIDOS POR MES (NOMBRE EN FRONT : VER APORTES POR MES Y AÑO)(OJO REVISAR)
+//TODO 27 .- REPORTE DE APORTES RECIBIDOS POR MES (NOMBRE EN FRONT : VER APORTES POR MES Y AÑO)(OJO REVISAR)
 async generarReporteHistorial(mes?: number, gestion?: number): Promise<StreamableFile> {
   try {
     // Validar parámetros
@@ -3508,57 +3692,7 @@ for (const detalle of detalles) {
   }
 }
 
-// 29 .- VALIDAR LIQUIDACIONES
-async validarLiquidacion(idPlanilla: number, payload: { fecha_pago?: string; valido_cotizacion?: string }): Promise<any> {
-  const planilla = await this.planillaRepo.findOne({ 
-    where: { id_planilla_aportes: idPlanilla },
-    relations: ['empresa'] // Por si necesitas datos de la empresa
-  });
 
-  if (!planilla) {
-    throw new NotFoundException('La planilla no existe.');
-  }
-
-  // NUEVA VALIDACIÓN: Verificar si ya está validada
-  if (planilla.fecha_liquidacion && planilla.valido_cotizacion) {
-    return {
-      mensaje: 'La liquidación ya está validada.',
-      planilla: planilla,
-      validado_por: planilla.valido_cotizacion,
-      fecha_validacion: planilla.fecha_liquidacion,
-      ya_validada: true
-    };
-  }
-
-  // Actualizar fecha_pago solo si se proporciona
-  if (payload.fecha_pago) {
-    const parsedFechaPago = new Date(payload.fecha_pago);
-    if (isNaN(parsedFechaPago.getTime())) {
-      throw new BadRequestException('La fecha de pago proporcionada no es válida.');
-    }
-    planilla.fecha_pago = parsedFechaPago;
-  }
-
-  // Siempre actualizar fecha_liquidacion
-  planilla.fecha_liquidacion = new Date();
-
-  // ACTUALIZAR el nombre del validador (siempre requerido para validaciones)
-  planilla.valido_cotizacion = payload.valido_cotizacion || 'Administrador';
-
-  // AGREGAR LOG para debug
-  console.log(`💚 Validando liquidación ${idPlanilla} por: ${planilla.valido_cotizacion}`);
-
-  // Guardar los cambios
-  const planillaActualizada = await this.planillaRepo.save(planilla);
-
-  return {
-    mensaje: 'Liquidación validada correctamente.',
-    planilla: planillaActualizada,
-    validado_por: planilla.valido_cotizacion,
-    fecha_validacion: planilla.fecha_liquidacion,
-    ya_validada: false
-  };
-}
 
 //* 30 .- REPORTE AFILIACIONES VIGENTES NO VIGENTES (NOMBRE EN FRONT : REPORTE AFILIACIONES)
 async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
