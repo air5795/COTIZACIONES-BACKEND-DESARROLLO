@@ -903,6 +903,39 @@ async obtenerLiquidacion(@Param('id') id: number) {
 }
 
 
+@Post(':id/validar-planilla')
+@ApiOperation({ summary: 'Validar planilla con nombre del administrador' })
+@ApiParam({ name: 'id', type: 'number', description: 'ID de la planilla' })
+@ApiBody({
+  schema: {
+    type: 'object',
+    properties: {
+      nombreAdministrador: { type: 'string', description: 'Nombre completo del administrador' }
+    },
+    required: ['nombreAdministrador']
+  }
+})
+async validarPlanilla(
+  @Param('id') id: number,
+  @Body('nombreAdministrador') nombreAdministrador: string
+): Promise<any> {
+  try {
+    if (!nombreAdministrador || nombreAdministrador.trim() === '') {
+      throw new BadRequestException('El nombre del administrador es obligatorio');
+    }
+
+    return await this.planillasAportesService.validarPlanilla(id, nombreAdministrador.trim());
+  } catch (error) {
+    throw new HttpException(
+      {
+        status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message || 'Error al validar la planilla',
+      },
+      error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+}
+
 
 
 //!---------------------------------------------------------------------------------------------------------------------------

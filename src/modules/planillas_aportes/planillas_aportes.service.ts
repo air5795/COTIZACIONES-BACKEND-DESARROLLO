@@ -3260,7 +3260,32 @@ async recalcularLiquidacionPublica(idPlanilla: number, fechaPago: Date): Promise
 
 
 
+async validarPlanilla(idPlanilla: number, nombreAdministrador: string): Promise<any> {
+  try {
+    const planilla = await this.planillaRepo.findOne({ 
+      where: { id_planilla_aportes: idPlanilla },
+      relations: ['empresa']
+    });
 
+    if (!planilla) {
+      throw new NotFoundException('La planilla no existe.');
+    }
+
+    // Actualizar el campo valido_cotizacion con el nombre completo del administrador
+    planilla.valido_cotizacion = nombreAdministrador;
+
+    // Guardar los cambios
+    const planillaActualizada = await this.planillaRepo.save(planilla);
+
+    return {
+      mensaje: 'Planilla validada correctamente.',
+      planilla: planillaActualizada,
+      validado_por: nombreAdministrador,
+    };
+  } catch (error) {
+    throw new BadRequestException(`Error al validar la planilla: ${error.message}`);
+  }
+}
 
 
 
