@@ -1,4 +1,4 @@
-import { Controller, Post, Get,StreamableFile, UseInterceptors, UploadedFile, BadRequestException, Body, Param, Put, HttpException, HttpStatus, Res, Delete, Query, ParseIntPipe, Sse, Patch } from '@nestjs/common';
+import { Controller, Post, Get,StreamableFile, UseInterceptors, UploadedFile, BadRequestException, Body, Param, Put, HttpException, HttpStatus, Res, Delete, Query, ParseIntPipe, Sse, Patch, NotFoundException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { PlanillasAportesService } from './planillas_aportes.service';
@@ -1020,21 +1020,97 @@ async generarReporteHistorial(
 }
 
 // 28 .- CRUCE AFLILIADOS -----------------------------------------------------
+// 28 .- VERIFICAR AFILIACIÓN DE DETALLES - ENDPOINT ACTUALIZADO
 @Post('verificar-afiliacion/:id_planilla')
-  @ApiOperation({ 
-    summary: 'Verificar afiliación de asegurados en los detalles de una planilla', 
-    description: 'Consulta el estado de afiliación de cada asegurado en los detalles de una planilla y actualiza el campo es_afiliado.' 
-  })
-  @ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
-  @ApiResponse({ status: 200, description: 'Verificación completada con éxito' })
-  @ApiResponse({ status: 400, description: 'Error al verificar afiliación' })
-  async verificarAfiliacionDetalles(@Param('id_planilla', ParseIntPipe) id_planilla: number) {
-    try {
-      return await this.planillasAportesService.verificarAfiliacionDetalles(id_planilla);
-    } catch (error) {
-      throw new BadRequestException(error.message);
+@ApiOperation({ 
+  summary: 'Verificar afiliación de trabajadores con API externa SIIGA-H',
+  description: 'Procesa todos los trabajadores de una planilla por lotes para verificar su estado de afiliación contra la API externa. Actualiza matricula, tipo_afiliado, asegurado_tipo y asegurado_estado.'
+})
+@ApiParam({ 
+  name: 'id_planilla', 
+  description: 'ID de la planilla de aportes', 
+  type: Number,
+  example: 123
+})
+@ApiResponse({ 
+  status: 200, 
+  description: 'Verificación completada con éxito',
+  schema: {
+    type: 'object',
+    properties: {
+      mensaje: {
+        type: 'string',
+        example: 'Verificación completada exitosamente. Se actualizaron 150 detalles con información de afiliación.'
+      },
+      detallesActualizados: {
+        type: 'number',
+        example: 150
+      },
+      tiempoEjecucion: {
+        type: 'string',
+        example: '2.5 minutos'
+      }
     }
   }
+})
+@ApiResponse({ 
+  status: 400, 
+  description: 'Error al verificar afiliación',
+  schema: {
+    type: 'object',
+    properties: {
+      statusCode: { type: 'number', example: 400 },
+      message: { type: 'string', example: 'El ID de la planilla debe ser un número positivo' },
+      error: { type: 'string', example: 'Bad Request' }
+    }
+  }
+})
+@ApiResponse({ 
+  status: 404, 
+  description: 'Planilla no encontrada',
+  schema: {
+    type: 'object',
+    properties: {
+      statusCode: { type: 'number', example: 404 },
+      message: { type: 'string', example: 'No se encontraron detalles para la planilla especificada' },
+      error: { type: 'string', example: 'Not Found' }
+    }
+  }
+})
+async verificarAfiliacionDetalles(@Param('id_planilla', ParseIntPipe) id_planilla: number) {
+  try {
+    const inicioTiempo = Date.now();
+    
+    console.log(`🚀 Iniciando verificación de afiliaciones para planilla ${id_planilla}`);
+    
+    const resultado = await this.planillasAportesService.verificarAfiliacionDetalles(id_planilla);
+    
+    const tiempoTranscurrido = Date.now() - inicioTiempo;
+    const tiempoEnMinutos = (tiempoTranscurrido / 60000).toFixed(1);
+    
+    console.log(`✅ Verificación completada en ${tiempoEnMinutos} minutos`);
+    
+    return {
+      ...resultado,
+      tiempoEjecucion: `${tiempoEnMinutos} minutos`,
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    console.error(`❌ Error en verificación de afiliaciones para planilla ${id_planilla}:`, error);
+    
+    // Distinguir entre diferentes tipos de errores
+    if (error instanceof BadRequestException) {
+      throw error;
+    } else if (error instanceof NotFoundException) {
+      throw error;
+    } else {
+      // Error genérico/interno
+      throw new BadRequestException(
+        `Error interno al verificar afiliaciones: ${error.message || 'Error desconocido'}`
+      );
+    }
+  }
+}
 
   // 29 .- 
 
@@ -1051,7 +1127,7 @@ async validarLiquidacion(
 
 // 30 .- REPORTE AFILIACIONES VIGENTE NO VIGENTES 
 
-@Get('reporte-afiliacion/:id_planilla')
+/* @Get('reporte-afiliacion/:id_planilla')
 @ApiOperation({ summary: 'Generar reporte PDF de afiliación por planilla' })
 @ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
 @ApiResponse({ status: 200, description: 'Reporte PDF generado exitosamente', type: StreamableFile })
@@ -1071,7 +1147,7 @@ async generarReporteAfiliacion(
       details: error.message,
     });
   }
-}
+} */
 
 // 31.- REPORTE DE DETALLES DE PLANILLA EN EXCEL 
 

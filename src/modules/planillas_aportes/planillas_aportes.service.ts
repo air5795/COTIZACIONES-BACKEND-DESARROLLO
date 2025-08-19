@@ -1059,10 +1059,13 @@ async obtenerDetalles(id_planilla: number, pagina: number = 1, limite: number = 
         'detalle.salario',
         'detalle.regional',
         'detalle.haber_basico',
-        'detalle.es_afiliado',
         'detalle.matricula',
+
         'detalle.tipo_afiliado',
+        'detalle.asegurado_tipo',
+        'detalle.asegurado_estado',
         'detalle.tipo',
+        'detalle.observaciones_afiliacion',
       ]);
 
     // Paginación
@@ -3620,15 +3623,14 @@ async generarReporteHistorial(mes?: number, gestion?: number): Promise<Streamabl
   }
 }
 
-// 28 .- CRUCE CON AFILIACIONES
-async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string; detallesActualizados: number }> {
+// 28 .- CRUCE CON AFILIACIONES 1 
+
+async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string; detallesActualizados: number; estadisticas: any }> {
   try {
-    // Validar parámetro
     if (!idPlanilla || idPlanilla < 1) {
       throw new BadRequestException('El ID de la planilla debe ser un número positivo');
     }
 
-    // Obtener todos los detalles de la planilla
     const detalles = await this.detalleRepo.find({
       where: { id_planilla_aportes: idPlanilla },
     });
@@ -3637,82 +3639,187 @@ async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string
       throw new BadRequestException('No se encontraron detalles para la planilla especificada');
     }
 
-    let detallesActualizados = 0;
+    console.log(`📊 Iniciando verificación de ${detalles.length} registros para planilla ${idPlanilla}...`);
 
-    // Asegurarse de que el token esté disponible
+    let detallesActualizados = 0;
+    const BATCH_SIZE = 50;
+    const CONCURRENT_REQUESTS = 5;
+    
+    // Estadísticas mejoradas
+    const estadisticas = {
+      total_procesados: 0,
+      encontrados_vigentes: 0,
+      encontrados_no_vigentes: 0,
+      mensajes_especiales: 0, // Para casos como BAJA, etc.
+      no_encontrados: 0,
+      errores_consulta: 0,
+      ci_no_coinciden: 0
+    };
+    
     if (!this.externalApiService.getApiToken()) {
+      console.log('🔑 Obteniendo token de API externa...');
       await this.externalApiService.loginToExternalApi();
     }
 
-    // Iterar sobre cada detalle
-for (const detalle of detalles) {
+    const lotes = [];
+    for (let i = 0; i < detalles.length; i += BATCH_SIZE) {
+      lotes.push(detalles.slice(i, i + BATCH_SIZE));
+    }
+
+    console.log(`📦 Procesando ${lotes.length} lotes de ${BATCH_SIZE} registros cada uno`);
+
+    // Función para procesar un detalle individual
+    const procesarDetalle = async (detalle: any) => {
   try {
-    // Extraer el número base del CI (antes del guion) para enviarlo a la API
-    const ciBase = detalle.ci.split('-')[0].trim(); // Esto asegura que mandas solo el número
+    // Limpiar campos
+    detalle.matricula = null;
+    detalle.tipo_afiliado = null;
+    detalle.asegurado_tipo = null;
+    detalle.asegurado_estado = null;
+    detalle.observaciones_afiliacion = null;
+    detalle.fecha_ultima_verificacion = new Date();
 
-    // Llamar al servicio con solo el número
+    const ciBase = detalle.ci.split('-')[0].trim();
     const response = await this.externalApiService.getAseguradoByCi(ciBase);
-
-    if (response.status && response.data) {
+    
+    // PRIMERA PRIORIDAD: Verificar si hay un mensaje (independiente de todo lo demás)
+    if (response.msg && response.msg.trim() !== '') {
+      console.log(`📝 MENSAJE ENCONTRADO para CI ${detalle.ci}: "${response.msg}"`);
+      detalle.observaciones_afiliacion = response.msg.trim();
+      estadisticas.mensajes_especiales++;
+      estadisticas.total_procesados++;
+      return detalle;
+    }
+    
+    // SEGUNDA PRIORIDAD: Verificar si hay datos válidos
+    if (response.status === true && response.data && response.data.ASE_CI) {
+      console.log(`✅ DATOS ENCONTRADOS para CI ${detalle.ci}`);
+      
       const data = response.data;
-
       const ciApi = (data.ASE_CI || '').trim();
       const complementoApi = (data.ASE_CI_COM || '').trim().toUpperCase();
       const ciApiCompleto = complementoApi ? `${ciApi}-${complementoApi}` : ciApi;
-
       const ciDetalle = detalle.ci.trim().toUpperCase();
 
-      console.log(`CI de detalle: ${ciDetalle}`);
-      console.log(`CI de API: ${ciApiCompleto}`);
-
-      const coinciden = ciApiCompleto === ciDetalle;
-
-      if (coinciden) {
-        detalle.es_afiliado = data.ASE_ESTADO === 'VIGENTE';
-        if (detalle.es_afiliado) {
-          detalle.matricula = data.ASE_MAT || null;
-          detalle.tipo_afiliado = data.ASE_COND_EST || null;
-          console.log(`✔️ Coincide. CI ${ciDetalle} está afiliado. Matrícula: ${detalle.matricula}`);
+      if (ciApiCompleto === ciDetalle) {
+        // Mapear datos exitosos
+        detalle.matricula = data.ASE_MAT || null;
+        detalle.tipo_afiliado = data.ASE_COND_EST || null;
+        detalle.asegurado_tipo = data.ASE_TIPO || null;
+        detalle.asegurado_estado = data.ASE_ESTADO || null;
+        
+        if (data.ASE_ESTADO === 'VIGENTE') {
+          estadisticas.encontrados_vigentes++;
         } else {
-          detalle.matricula = null;
-          detalle.tipo_afiliado = null;
-          console.log(`✔️ Coincide. CI ${ciDetalle} no está afiliado.`);
+          estadisticas.encontrados_no_vigentes++;
         }
+        
+        console.log(`✅ Datos mapeados para CI ${ciDetalle}: Estado=${data.ASE_ESTADO}, Matrícula=${data.ASE_MAT}`);
       } else {
-        // No coincide, marcar como no afiliado
-        detalle.es_afiliado = false;
-        detalle.matricula = null;
-        detalle.tipo_afiliado = null;
-        console.log(`❌ No coincide. CI Detalle: ${ciDetalle} | CI API: ${ciApiCompleto}`);
+        // CI no coincide
+        detalle.observaciones_afiliacion = `CI no coincide. Planilla: ${ciDetalle}, Sistema: ${ciApiCompleto}`;
+        estadisticas.ci_no_coinciden++;
       }
-
     } else {
-      detalle.es_afiliado = false;
-      detalle.matricula = null;
-      detalle.tipo_afiliado = null;
-      console.log(`⚠️ No se encontró CI ${detalle.ci} en la API`);
+      // TERCERA PRIORIDAD: No hay mensaje ni datos
+      console.log(`❓ SIN INFORMACIÓN para CI ${detalle.ci}`);
+      detalle.observaciones_afiliacion = 'No se encontró información en el sistema de afiliaciones';
+      estadisticas.no_encontrados++;
     }
 
-    await this.detalleRepo.save(detalle);
-    detallesActualizados++;
+    estadisticas.total_procesados++;
+    return detalle;
 
   } catch (error) {
-    console.error(`❌ Error al consultar CI ${detalle.ci}: ${error.message}`);
-    detalle.es_afiliado = false;
+    console.error(`❌ ERROR para CI ${detalle.ci}: ${error.message}`);
+    
     detalle.matricula = null;
     detalle.tipo_afiliado = null;
-    await this.detalleRepo.save(detalle);
-    detallesActualizados++;
+    detalle.asegurado_tipo = null;
+    detalle.asegurado_estado = null;
+    detalle.observaciones_afiliacion = `Error de consulta: ${error.message}`;
+    detalle.fecha_ultima_verificacion = new Date();
+    
+    estadisticas.errores_consulta++;
+    estadisticas.total_procesados++;
+    return detalle;
   }
-}
+};
 
+    // Función para procesar lote con control de concurrencia
+    const procesarLoteConControlConcurrencia = async (lote: any[]) => {
+      const resultados = [];
+      
+      for (let i = 0; i < lote.length; i += CONCURRENT_REQUESTS) {
+        const sublote = lote.slice(i, i + CONCURRENT_REQUESTS);
+        const resultadosSublote = await Promise.all(
+          sublote.map(detalle => procesarDetalle(detalle))
+        );
+        resultados.push(...resultadosSublote);
+        
+        if (i + CONCURRENT_REQUESTS < lote.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+      
+      return resultados;
+    };
 
+    // Procesar cada lote
+    for (let indiceLote = 0; indiceLote < lotes.length; indiceLote++) {
+      const lote = lotes[indiceLote];
+      console.log(`🔄 Procesando lote ${indiceLote + 1}/${lotes.length} (${lote.length} registros)`);
+
+      const detallesActualizadosLote = await procesarLoteConControlConcurrencia(lote);
+
+      try {
+        await this.detalleRepo.save(detallesActualizadosLote, { 
+          chunk: 100,
+          reload: false
+        });
+        detallesActualizados += detallesActualizadosLote.length;
+        console.log(`💾 Lote ${indiceLote + 1} guardado exitosamente (${detallesActualizadosLote.length} registros)`);
+      } catch (saveError) {
+        console.error(`❌ Error al guardar lote ${indiceLote + 1}:`, saveError);
+        
+        for (const detalle of detallesActualizadosLote) {
+          try {
+            await this.detalleRepo.save(detalle);
+            detallesActualizados++;
+          } catch (individualError) {
+            console.error(`❌ Error al guardar registro individual CI ${detalle.ci}:`, individualError);
+          }
+        }
+      }
+
+      if (indiceLote < lotes.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      if ((indiceLote + 1) % 5 === 0) {
+        const progreso = ((indiceLote + 1) / lotes.length * 100).toFixed(1);
+        console.log(`📈 Progreso: ${progreso}% (${indiceLote + 1}/${lotes.length} lotes procesados)`);
+      }
+    }
+
+    // Estadísticas finales mejoradas
+    console.log(`📊 ESTADÍSTICAS FINALES:`);
+    console.log(`   Total procesados: ${estadisticas.total_procesados}`);
+    console.log(`   ✅ Encontrados vigentes: ${estadisticas.encontrados_vigentes}`);
+    console.log(`   ⚠️ Encontrados no vigentes: ${estadisticas.encontrados_no_vigentes}`);
+    console.log(`   📝 Con mensajes especiales: ${estadisticas.mensajes_especiales}`);
+    console.log(`   ❓ No encontrados: ${estadisticas.no_encontrados}`);
+    console.log(`   ❌ CI no coinciden: ${estadisticas.ci_no_coinciden}`);
+    console.log(`   🚨 Errores de consulta: ${estadisticas.errores_consulta}`);
+    console.log(`✅ Verificación completada. Total actualizados: ${detallesActualizados}`);
 
     return {
-      mensaje: `Verificación completada. Se actualizaron ${detallesActualizados} detalles.`,
+      mensaje: `Verificación completada exitosamente. Se actualizaron ${detallesActualizados} detalles.`,
       detallesActualizados,
+      estadisticas
     };
   } catch (error) {
+    console.error('❌ Error en verificarAfiliacionDetalles:', error);
     throw new BadRequestException(`Error al verificar afiliación: ${error.message}`);
   }
 }
@@ -3720,7 +3827,7 @@ for (const detalle of detalles) {
 
 
 //* 30 .- REPORTE AFILIACIONES VIGENTES NO VIGENTES (NOMBRE EN FRONT : REPORTE AFILIACIONES)
-async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
+/* async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
   try {
     // Fetch planilla data
     const planilla = await this.planillaRepo.findOne({
@@ -3827,7 +3934,7 @@ async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
 
 
 
-}
+} */
 
 //* 31.- REPORTE DE DETALLES DE PLANILLA EN EXCEL (NOMBRE EN FRONT : PLANILLA EXCEL)
 async generarReporteDetallesExcel(idPlanilla: number): Promise<StreamableFile> {
@@ -3869,7 +3976,7 @@ async generarReporteDetallesExcel(idPlanilla: number): Promise<StreamableFile> {
         salario: detalle.salario || 0,
         regional: detalle.regional || '',
         haber_basico: detalle.haber_basico || 0,
-        es_afiliado: detalle.es_afiliado ? 'Sí' : 'No',
+        /* es_afiliado: detalle.es_afiliado ? 'Sí' : 'No', */
       }));
 
       // Preparar datos para Carbone, incluyendo los nuevos campos

@@ -63,14 +63,21 @@ export class PlanillaAportesDetalles {
   @Column()
   regional: string;
 
-  @Column({ type: 'boolean', nullable: true })
-  es_afiliado: boolean | null;
+  @Column({ nullable: true })
+  matricula: string; // ASE_MAT
 
-  @Column()
-  matricula: string;
+  @Column({ nullable: true })
+  tipo_afiliado: string; // ASE_COND_EST
 
-  @Column()
-  tipo_afiliado: string;
+  @Column({ type: 'text', nullable: true })
+  observaciones_afiliacion: string; // Para almacenar mensajes de la API
+
+  // NUEVOS CAMPOS AGREGADOS:
+  @Column({ nullable: true })
+  asegurado_tipo: string; // ASE_TIPO: (ACTIVO)(PASIVO)(EXT DE SEGURO)
+
+  @Column({ nullable: true })
+  asegurado_estado: string; // ASE_ESTADO: (VIGENTE)(BAJA)(CESANTIA)(FALLECIDO)(DER HABIENTE)
 
   @Column({ type: 'varchar', nullable: false, default: 'mensual' })
   tipo: 'Mensual' | 'Planilla Adicional' | 'Planilla Retroactivo';
