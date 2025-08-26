@@ -4577,15 +4577,6 @@ async obtenerResumenConAdicionales(idPlanillaMensual: number) {
 
 
 
-
-
-
-
-
-
-
-
-
 // NUEVO MÉTODO: Buscar planilla del mes anterior usando fecha_planilla
 async buscarPlanillaMesAnterior(codPatronal: string, fechaActual: Date): Promise<any> {
   try {
@@ -4625,6 +4616,129 @@ async buscarPlanillaMesAnterior(codPatronal: string, fechaActual: Date): Promise
   } catch (error) {
     console.error('Error al buscar planilla del mes anterior:', error);
     return null;
+  }
+}
+
+
+// Agregar este nuevo método en tu planillas_aportes.service.ts
+
+// 31.- OBTENER DATOS DE VERIFICACIÓN GUARDADOS DE CRUCE DE AFILIACIONES
+async obtenerDatosVerificacionGuardados(idPlanilla: number): Promise<any> {
+  try {
+    // Obtener información de la planilla
+    const planilla = await this.planillaRepo.findOne({
+      where: { id_planilla_aportes: idPlanilla },
+      relations: ['empresa'],
+    });
+
+    if (!planilla) {
+      throw new NotFoundException('Planilla no encontrada');
+    }
+
+    // Verificar que la planilla tenga fecha de verificación
+    if (!planilla.fecha_verificacion_afiliacion) {
+      throw new NotFoundException('Esta planilla no tiene datos de verificación guardados');
+    }
+
+    // Obtener todos los detalles de la planilla
+    const detalles = await this.detalleRepo.find({
+      where: { id_planilla_aportes: idPlanilla },
+      order: { apellido_paterno: 'ASC', apellido_materno: 'ASC', nombres: 'ASC' }
+    });
+
+    if (!detalles || detalles.length === 0) {
+      throw new BadRequestException('No se encontraron detalles para la planilla');
+    }
+
+    // Clasificar trabajadores según su estado de afiliación
+    const trabajadoresVigentes = detalles.filter(d => d.asegurado_estado === 'VIGENTE');
+    const trabajadoresNoVigentes = detalles.filter(d => 
+      d.asegurado_estado && d.asegurado_estado !== 'VIGENTE' && d.asegurado_estado !== null
+    );
+    const trabajadoresNoEncontrados = detalles.filter(d => 
+      !d.asegurado_estado || d.asegurado_estado === null
+    );
+
+    // Crear estructura de casos (similar a verificarAfiliacionDetalles)
+    const casos = {
+      vigentes: trabajadoresVigentes.map(detalle => ({
+        ci: detalle.ci,
+        nombres: detalle.nombres,
+        apellido_paterno: detalle.apellido_paterno,
+        apellido_materno: detalle.apellido_materno,
+        cargo: detalle.cargo,
+        regional: detalle.regional,
+        salario: detalle.salario,
+        matricula: detalle.matricula,
+        tipo_afiliado: detalle.tipo_afiliado,
+        asegurado_tipo: detalle.asegurado_tipo,
+        asegurado_estado: detalle.asegurado_estado,
+        observaciones_afiliacion: detalle.observaciones_afiliacion
+      })),
+      no_vigentes: trabajadoresNoVigentes.map(detalle => ({
+        ci: detalle.ci,
+        nombres: detalle.nombres,
+        apellido_paterno: detalle.apellido_paterno,
+        apellido_materno: detalle.apellido_materno,
+        cargo: detalle.cargo,
+        regional: detalle.regional,
+        salario: detalle.salario,
+        asegurado_estado: detalle.asegurado_estado,
+        asegurado_tipo: detalle.asegurado_tipo,
+        observaciones_afiliacion: detalle.observaciones_afiliacion
+      })),
+      no_encontrados: trabajadoresNoEncontrados.map(detalle => ({
+        ci: detalle.ci,
+        nombres: detalle.nombres,
+        apellido_paterno: detalle.apellido_paterno,
+        apellido_materno: detalle.apellido_materno,
+        cargo: detalle.cargo,
+        regional: detalle.regional,
+        salario: detalle.salario,
+        asegurado_estado: detalle.asegurado_estado,
+        asegurado_tipo: detalle.asegurado_tipo,
+        observaciones_afiliacion: detalle.observaciones_afiliacion
+      })),
+      faltantes: [] // Este dato no se puede reconstruir, se necesitaría guardar por separado
+    };
+
+    // Crear resumen
+    const resumen = {
+      vigentes: trabajadoresVigentes.length,
+      no_vigentes: trabajadoresNoVigentes.length,
+      no_encontrados: trabajadoresNoEncontrados.length,
+      faltantes: 0, // Este dato no se puede reconstruir
+      total_planilla: detalles.length,
+      total_verificados: trabajadoresVigentes.length + trabajadoresNoVigentes.length
+    };
+
+    // Crear estadísticas (puedes expandir según tus necesidades)
+    const estadisticas = {
+      porcentaje_vigentes: detalles.length > 0 ? ((trabajadoresVigentes.length / detalles.length) * 100).toFixed(2) : '0.00',
+      porcentaje_no_vigentes: detalles.length > 0 ? ((trabajadoresNoVigentes.length / detalles.length) * 100).toFixed(2) : '0.00',
+      porcentaje_no_encontrados: detalles.length > 0 ? ((trabajadoresNoEncontrados.length / detalles.length) * 100).toFixed(2) : '0.00'
+    };
+
+    return {
+      success: true,
+      message: 'Datos de verificación recuperados exitosamente',
+      data: {
+        casos,
+        resumen,
+        estadisticas,
+        fecha_verificacion: planilla.fecha_verificacion_afiliacion,
+        planilla_info: {
+          mes: planilla.mes,
+          gestion: planilla.gestion,
+        }
+      }
+    };
+
+  } catch (error) {
+    if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      throw error;
+    }
+    throw new BadRequestException(`Error al obtener datos de verificación: ${error.message}`);
   }
 }
 

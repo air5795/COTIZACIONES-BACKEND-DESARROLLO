@@ -1324,6 +1324,33 @@ async obtenerResumenPlanillaMensual(@Param('id_planilla') id_planilla: number) {
   }
 }
 
+//
+
+// Agregar este nuevo endpoint en tu planillas_aportes.controller.ts
+
+// 31.- OBTENER DATOS DE VERIFICACIÓN GUARDADOS
+@Get('datos-verificacion/:id_planilla')
+@ApiOperation({ summary: 'Obtener datos de verificación guardados para una planilla' })
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla', type: Number })
+@ApiResponse({ status: 200, description: 'Datos de verificación obtenidos con éxito' })
+@ApiResponse({ status: 404, description: 'No se encontraron datos de verificación' })
+@ApiResponse({ status: 400, description: 'Error al obtener los datos' })
+async obtenerDatosVerificacionGuardados(
+  @Param('id_planilla', ParseIntPipe) id_planilla: number,
+) {
+  try {
+    return await this.planillasAportesService.obtenerDatosVerificacionGuardados(id_planilla);
+  } catch (error) {
+    throw new HttpException(
+      {
+        status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message || 'Error al obtener datos de verificación',
+      },
+      error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+}
+
 
 
 

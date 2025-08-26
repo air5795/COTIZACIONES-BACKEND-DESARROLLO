@@ -18,10 +18,7 @@ import { PlanillaIncapacidadesModule } from './modules/planilla-incapacidades/pl
 import { ResumenMensualRegionalModule } from './modules/resumen-mensual-regional/resumen-mensual-regional.module';
 import { UfvModule } from './modules/ufv/ufv.module';
 import { TipoCiteModule } from './modules/tipo-cite/tipo-cite.module';
-import { ControlCodigosModule } from './modules/control-codigos/control-codigos.module';
 import { PlanillaAportesDevengadosModule } from './modules/planilla-aportes-devengados/planilla-aportes-devengados.module';
-import { TipoMultasModule } from './modules/tipo-multas/tipo-multas.module';
-import { MultasModule } from './modules/multas/multas.module';
 import { ParteBajaAseguradoModule } from './modules/parte-baja-asegurado/parte-baja-asegurado.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 //import { APP_FILTER } from '@nestjs/core';
@@ -38,6 +35,8 @@ import { PagosAportesModule } from './modules/pagos-aportes/pagos-aportes.module
 import { PagosAportesAdicionalesModule } from './modules/pagos-aportes-adicionales/pagos-aportes-adicionales.module';
 import { EmpresasModule } from './modules/empresas/empresas.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
+import { IncapacidadesReembolsoModule } from './modules/incapacidades-reembolso/incapacidades-reembolso.module';
+import { TiposIncapacidadModule } from './modules/tipos-incapacidad/tipos-incapacidad.module';
 
 const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}?sslmode=disable`;
 
@@ -73,10 +72,7 @@ const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.e
     ResumenMensualRegionalModule,
     UfvModule,
     TipoCiteModule,
-    ControlCodigosModule,
     PlanillaAportesDevengadosModule,
-    TipoMultasModule,
-    MultasModule,
     ParteBajaAseguradoModule,
     LoggerModule,
     ApiClientModule,
@@ -90,6 +86,8 @@ const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.e
     PagosAportesAdicionalesModule,
     EmpresasModule,
     NotificacionesModule,
+    TiposIncapacidadModule,
+    IncapacidadesReembolsoModule,
 
   ],
   controllers: [],
