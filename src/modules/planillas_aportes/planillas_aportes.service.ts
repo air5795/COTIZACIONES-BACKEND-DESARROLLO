@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, StreamableFile, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Not, Repository } from 'typeorm';
+import { Between, Brackets, In, Not, Repository } from 'typeorm';
 import { PlanillasAporte } from './entities/planillas_aporte.entity';
 import { PlanillaAportesDetalles } from './entities/planillas_aportes_detalles.entity';
 import { HttpService } from '@nestjs/axios';
@@ -23,6 +23,9 @@ import { number } from 'joi';
 
 @Injectable()
 export class PlanillasAportesService {
+  findOne(idPlanillaAportes: number) {
+    throw new Error('Method not implemented.');
+  }
   constructor(
     @InjectRepository(PlanillasAporte)
     private planillaRepo: Repository<PlanillasAporte>,
@@ -636,6 +639,7 @@ async obtenerHistorial(cod_patronal: string,pagina: number = 1,limite: number = 
         fecha_creacion: planilla.fecha_creacion,
         fecha_declarada: planilla.fecha_declarada,
         fecha_pago: planilla.fecha_pago,
+        fecha_liquidacion: planilla.fecha_liquidacion,
         planillas_adicionales: parseInt(rawData.planillas_adicionales, 10) || 0
       };
     });
@@ -990,6 +994,7 @@ async obtenerPlanilla(id_planilla: number) {
       tipo_planilla: planilla.tipo_planilla,
       valido_cotizacion: planilla.valido_cotizacion,
       fecha_liquidacion: planilla.fecha_liquidacion,
+      fecha_verificacion_afiliacion: planilla.fecha_verificacion_afiliacion,
     };
 
     return { mensaje: 'Planilla obtenida con éxito', planilla: mappedPlanilla };
@@ -1039,6 +1044,28 @@ async obtenerDetalles(id_planilla: number, pagina: number = 1, limite: number = 
       }));
     }
 
+    // Crear una consulta separada para contar los estados de asegurados
+    const estadosQuery = this.detalleRepo.createQueryBuilder('detalle')
+      .innerJoin('detalle.planilla_aporte', 'planilla')
+      .where(
+        '(detalle.id_planilla_aportes = :id_planilla OR planilla.id_planilla_origen = :id_planilla)',
+        { id_planilla }
+      )
+      .select('detalle.asegurado_estado', 'estado')
+      .addSelect('COUNT(*)', 'cantidad')
+      .groupBy('detalle.asegurado_estado');
+
+    // Aplicar la misma búsqueda al conteo de estados si existe
+    if (busqueda && busqueda.trim() !== '') {
+      estadosQuery.andWhere(new Brackets(qb => {
+        qb.where('detalle.ci ILIKE :busqueda', { busqueda: `%${busqueda}%` })
+          .orWhere('detalle.apellido_paterno ILIKE :busqueda', { busqueda: `%${busqueda}%` })
+          .orWhere('detalle.apellido_materno ILIKE :busqueda', { busqueda: `%${busqueda}%` })
+          .orWhere('detalle.nombres ILIKE :busqueda', { busqueda: `%${busqueda}%` })
+          .orWhere('detalle.cargo ILIKE :busqueda', { busqueda: `%${busqueda}%` });
+      }));
+    }
+
     // Selección de campos y ordenamiento
     query
       .orderBy('detalle.nro', 'ASC')
@@ -1073,14 +1100,39 @@ async obtenerDetalles(id_planilla: number, pagina: number = 1, limite: number = 
       query.skip(skip).take(limite);
     }
 
-    // Ejecutar consulta
-    const [detalles, total] = await query.getManyAndCount();
+    // Ejecutar ambas consultas en paralelo
+    const [detallesResult, estadosResult] = await Promise.all([
+      query.getManyAndCount(),
+      estadosQuery.getRawMany()
+    ]);
+
+    const [detalles, total] = detallesResult;
+
+    // Procesar el conteo de estados
+    const conteoEstados = {
+      VIGENTE: 0,
+      BAJA: 0,
+      'DER HABIENTE': 0,
+      FALLECIDO: 0,
+      CESANTIA: 0
+    };
+
+    // Llenar el conteo con los resultados de la consulta
+    estadosResult.forEach(item => {
+      const estado = item.estado?.toUpperCase().trim();
+      const cantidad = parseInt(item.cantidad) || 0;
+      
+      if (estado && conteoEstados.hasOwnProperty(estado)) {
+        conteoEstados[estado] = cantidad;
+      }
+    });
 
     if (!detalles.length) {
       return {
         mensaje: 'No hay detalles registrados para esta planilla',
         detalles: [],
         total: 0,
+        conteo_estados_asegurados: conteoEstados
       };
     }
 
@@ -1091,6 +1143,7 @@ async obtenerDetalles(id_planilla: number, pagina: number = 1, limite: number = 
       total,
       pagina,
       limite,
+      conteo_estados_asegurados: conteoEstados
     };
   } catch (error) {
     console.error('Error en obtenerDetalles:', error);
@@ -3051,7 +3104,7 @@ private formatearRespuestaLiquidacion(planilla: any): any {
     descuento_min_salud: planilla.total_aportes_min_salud,
     otros_descuentos: planilla.otros_descuentos,
     total_a_cancelar: planilla.total_a_cancelar,
-    tipo_empresa: planilla.empresa?.tipo,
+    tipo_empresa: planilla.empresa?.tipo?.toUpperCase(),
     total_aportes_asuss: planilla.total_aportes_asuss,
     total_aportes_min_salud: planilla.total_aportes_min_salud,
     excedente: planilla.excedente,
@@ -3624,11 +3677,20 @@ async generarReporteHistorial(mes?: number, gestion?: number): Promise<Streamabl
 }
 
 // 28 .- CRUCE CON AFILIACIONES 1 
-
-async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string; detallesActualizados: number; estadisticas: any }> {
+async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string; detallesActualizados: number; estadisticas: any; casos: any; resumen: any; trabajadoresFaltantes: any[]; fecha_verificacion: Date }> {
   try {
     if (!idPlanilla || idPlanilla < 1) {
       throw new BadRequestException('El ID de la planilla debe ser un número positivo');
+    }
+
+    // 1. Obtener datos de la planilla y detalles
+    const planilla = await this.planillaRepo.findOne({
+      where: { id_planilla_aportes: idPlanilla },
+      relations: ['empresa']
+    });
+
+    if (!planilla) {
+      throw new BadRequestException('Planilla no encontrada');
     }
 
     const detalles = await this.detalleRepo.find({
@@ -3639,302 +3701,454 @@ async verificarAfiliacionDetalles(idPlanilla: number): Promise<{ mensaje: string
       throw new BadRequestException('No se encontraron detalles para la planilla especificada');
     }
 
-    console.log(`📊 Iniciando verificación de ${detalles.length} registros para planilla ${idPlanilla}...`);
+    console.log(`📊 Iniciando verificación COMPLETA de ${detalles.length} registros para planilla ${idPlanilla}...`);
+    console.log(`🏢 Empresa: ${planilla.empresa?.emp_nom}, Patrón: ${planilla.cod_patronal}`);
 
     let detallesActualizados = 0;
-    const BATCH_SIZE = 50;
-    const CONCURRENT_REQUESTS = 5;
+    const trabajadoresFaltantes = [];
     
-    // Estadísticas mejoradas
+    // Estadísticas expandidas
     const estadisticas = {
       total_procesados: 0,
       encontrados_vigentes: 0,
       encontrados_no_vigentes: 0,
-      mensajes_especiales: 0, // Para casos como BAJA, etc.
+      mensajes_especiales: 0,
       no_encontrados: 0,
       errores_consulta: 0,
-      ci_no_coinciden: 0
+      ci_no_coinciden: 0,
+      total_api_asegurados: 0,
+      total_api_vigentes: 0,
+      total_api_no_vigentes: 0,
+      trabajadores_faltantes: 0,
+      trabajadores_excluidos_baja: 0,
+      personas_unicas_planilla: 0,
+      personas_vigentes_planilla: 0,
+      registros_doble_cargo: 0
     };
     
+    // 2. Asegurar token de API
     if (!this.externalApiService.getApiToken()) {
       console.log('🔑 Obteniendo token de API externa...');
       await this.externalApiService.loginToExternalApi();
     }
 
-    const lotes = [];
-    for (let i = 0; i < detalles.length; i += BATCH_SIZE) {
-      lotes.push(detalles.slice(i, i + BATCH_SIZE));
-    }
-
-    console.log(`📦 Procesando ${lotes.length} lotes de ${BATCH_SIZE} registros cada uno`);
-
-    // Función para procesar un detalle individual
-    const procesarDetalle = async (detalle: any) => {
-  try {
-    // Limpiar campos
-    detalle.matricula = null;
-    detalle.tipo_afiliado = null;
-    detalle.asegurado_tipo = null;
-    detalle.asegurado_estado = null;
-    detalle.observaciones_afiliacion = null;
-    detalle.fecha_ultima_verificacion = new Date();
-
-    const ciBase = detalle.ci.split('-')[0].trim();
-    const response = await this.externalApiService.getAseguradoByCi(ciBase);
+    // 3. Obtener TODOS los asegurados del número patronal
+    console.log(`🔍 Obteniendo todos los asegurados del patrón ${planilla.cod_patronal}...`);
     
-    // PRIMERA PRIORIDAD: Verificar si hay un mensaje (independiente de todo lo demás)
-    if (response.msg && response.msg.trim() !== '') {
-      console.log(`📝 MENSAJE ENCONTRADO para CI ${detalle.ci}: "${response.msg}"`);
-      detalle.observaciones_afiliacion = response.msg.trim();
-      estadisticas.mensajes_especiales++;
-      estadisticas.total_procesados++;
-      return detalle;
-    }
-    
-    // SEGUNDA PRIORIDAD: Verificar si hay datos válidos
-    if (response.status === true && response.data && response.data.ASE_CI) {
-      console.log(`✅ DATOS ENCONTRADOS para CI ${detalle.ci}`);
+    let todosLosAsegurados = [];
+    try {
+      const responseAsegurados = await this.externalApiService.getAllAseguradosByNroPatronal(planilla.cod_patronal);
       
-      const data = response.data;
-      const ciApi = (data.ASE_CI || '').trim();
-      const complementoApi = (data.ASE_CI_COM || '').trim().toUpperCase();
-      const ciApiCompleto = complementoApi ? `${ciApi}-${complementoApi}` : ciApi;
-      const ciDetalle = detalle.ci.trim().toUpperCase();
-
-      if (ciApiCompleto === ciDetalle) {
-        // Mapear datos exitosos
-        detalle.matricula = data.ASE_MAT || null;
-        detalle.tipo_afiliado = data.ASE_COND_EST || null;
-        detalle.asegurado_tipo = data.ASE_TIPO || null;
-        detalle.asegurado_estado = data.ASE_ESTADO || null;
+      if (responseAsegurados.status && responseAsegurados.data) {
+        todosLosAsegurados = responseAsegurados.data;
+        estadisticas.total_api_asegurados = todosLosAsegurados.length;
         
-        if (data.ASE_ESTADO === 'VIGENTE') {
-          estadisticas.encontrados_vigentes++;
-        } else {
-          estadisticas.encontrados_no_vigentes++;
-        }
+        // Contar por estado
+        estadisticas.total_api_vigentes = todosLosAsegurados.filter(a => a.ASE_ESTADO === 'VIGENTE').length;
+        estadisticas.total_api_no_vigentes = todosLosAsegurados.filter(a => a.ASE_ESTADO !== 'VIGENTE').length;
         
-        console.log(`✅ Datos mapeados para CI ${ciDetalle}: Estado=${data.ASE_ESTADO}, Matrícula=${data.ASE_MAT}`);
+        console.log(`📋 Obtenidos ${todosLosAsegurados.length} asegurados de la API:`);
+        console.log(`   ✅ Vigentes: ${estadisticas.total_api_vigentes}`);
+        console.log(`   ⚠️ No vigentes: ${estadisticas.total_api_no_vigentes}`);
       } else {
-        // CI no coincide
-        detalle.observaciones_afiliacion = `CI no coincide. Planilla: ${ciDetalle}, Sistema: ${ciApiCompleto}`;
-        estadisticas.ci_no_coinciden++;
+        console.log(`❌ No se pudieron obtener asegurados del patrón ${planilla.cod_patronal}`);
       }
-    } else {
-      // TERCERA PRIORIDAD: No hay mensaje ni datos
-      console.log(`❓ SIN INFORMACIÓN para CI ${detalle.ci}`);
-      detalle.observaciones_afiliacion = 'No se encontró información en el sistema de afiliaciones';
-      estadisticas.no_encontrados++;
+    } catch (error) {
+      console.error(`❌ Error al obtener asegurados del patrón:`, error);
     }
 
-    estadisticas.total_procesados++;
-    return detalle;
+    // 4. Crear mapas para comparación eficiente
+    const aseguradosMap = new Map();
 
-  } catch (error) {
-    console.error(`❌ ERROR para CI ${detalle.ci}: ${error.message}`);
-    
-    detalle.matricula = null;
-    detalle.tipo_afiliado = null;
-    detalle.asegurado_tipo = null;
-    detalle.asegurado_estado = null;
-    detalle.observaciones_afiliacion = `Error de consulta: ${error.message}`;
-    detalle.fecha_ultima_verificacion = new Date();
-    
-    estadisticas.errores_consulta++;
-    estadisticas.total_procesados++;
-    return detalle;
-  }
-};
-
-    // Función para procesar lote con control de concurrencia
-    const procesarLoteConControlConcurrencia = async (lote: any[]) => {
-      const resultados = [];
+    // Mapear asegurados de la API por CI base
+    todosLosAsegurados.forEach(asegurado => {
+      const ciApi = (asegurado.ASE_CI || '').toString().trim();
+      const complementoApi = (asegurado.ASE_CI_COM || '').trim().toUpperCase();
+      const complementoValido = complementoApi && 
+                               complementoApi !== '-' && 
+                               complementoApi !== '' && 
+                               complementoApi.length > 0;
       
-      for (let i = 0; i < lote.length; i += CONCURRENT_REQUESTS) {
-        const sublote = lote.slice(i, i + CONCURRENT_REQUESTS);
-        const resultadosSublote = await Promise.all(
-          sublote.map(detalle => procesarDetalle(detalle))
-        );
-        resultados.push(...resultadosSublote);
+      const ciCompleto = complementoValido ? `${ciApi}-${complementoApi}` : ciApi;
+      
+      // Mapear por CI base y completo
+      aseguradosMap.set(ciApi, asegurado);
+      aseguradosMap.set(ciApi.toUpperCase(), asegurado);
+      aseguradosMap.set(ciCompleto, asegurado);
+      aseguradosMap.set(ciCompleto.toUpperCase(), asegurado);
+      aseguradosMap.set(ciApi.toLowerCase(), asegurado);
+      aseguradosMap.set(ciCompleto.toLowerCase(), asegurado);
+    });
+
+    console.log(`🗺️ Asegurados mapeados: ${aseguradosMap.size} entradas para ${todosLosAsegurados.length} asegurados`);
+
+    // 5. Identificar trabajadores faltantes - CORREGIDO
+    console.log(`🔍 Identificando trabajadores faltantes (considerando doble cargo)...`);
+
+    // Crear un Set de CIs base únicos que SÍ están en la planilla (NORMALIZADO)
+    const cisBasePlanilla = new Set();
+    detalles.forEach(detalle => {
+      const ciBase = detalle.ci.split('-')[0].trim().toLowerCase();
+      cisBasePlanilla.add(ciBase);
+    });
+
+    console.log(`👥 CIs base únicos en planilla: ${cisBasePlanilla.size}`);
+
+    // Limpiar el array de trabajadores faltantes
+    trabajadoresFaltantes.length = 0;
+
+    // Comparar cada asegurado vigente de la API
+    let contadorFaltantes = 0;
+    todosLosAsegurados.forEach((asegurado) => {
+      if (asegurado.ASE_ESTADO === 'VIGENTE') {
+        const ciApiBase = (asegurado.ASE_CI || '').toString().trim().toLowerCase();
         
-        if (i + CONCURRENT_REQUESTS < lote.length) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+        // Verificar si este CI base está en la planilla
+        const estaEnPlanilla = cisBasePlanilla.has(ciApiBase);
+        
+        if (!estaEnPlanilla) {
+          // ESTE SÍ es un faltante real
+          const complementoApi = (asegurado.ASE_CI_COM || '').trim().toUpperCase();
+          const complementoValido = complementoApi && 
+                                  complementoApi !== '-' && 
+                                  complementoApi !== '' && 
+                                  complementoApi.length > 0;
+          const ciCompleto = complementoValido ? `${asegurado.ASE_CI}-${complementoApi}` : asegurado.ASE_CI;
+          
+          contadorFaltantes++;
+          trabajadoresFaltantes.push({
+            ci: ciCompleto,
+            nombres: asegurado.ASE_NOM,
+            apellido_paterno: asegurado.ASE_APAT,
+            apellido_materno: asegurado.ASE_AMAT,
+            matricula: asegurado.ASE_MAT,
+            cargo: asegurado.ASE_CARGO,
+            estado: asegurado.ASE_ESTADO,
+            tipo: asegurado.ASE_TIPO,
+            fecha_afiliacion: asegurado.ASE_FEC_AFI,
+            haber: asegurado.ASE_HABER
+          });
+          
+          console.log(`❓ FALTANTE ${contadorFaltantes}: CI ${ciCompleto} - ${asegurado.ASE_NOM} ${asegurado.ASE_APAT}`);
         }
+      } else {
+        estadisticas.trabajadores_excluidos_baja++;
       }
-      
-      return resultados;
+    });
+
+    // Actualizar estadística
+    estadisticas.trabajadores_faltantes = trabajadoresFaltantes.length;
+
+    console.log(`❓ Trabajadores (personas) faltantes en planilla: ${trabajadoresFaltantes.length}`);
+    console.log(`🚫 Trabajadores excluidos (BAJA/otros): ${estadisticas.trabajadores_excluidos_baja}`);
+
+    // 6. Procesar detalles de la planilla
+    console.log(`🔄 Procesando ${detalles.length} trabajadores de la planilla...`);
+
+    const procesarDetalle = async (detalle: any) => {
+      try {
+        // Limpiar campos
+        detalle.matricula = null;
+        detalle.tipo_afiliado = null;
+        detalle.asegurado_tipo = null;
+        detalle.asegurado_estado = null;
+        detalle.observaciones_afiliacion = null;
+        detalle.fecha_ultima_verificacion = new Date();
+
+        const ciBase = detalle.ci.split('-')[0].trim();
+        
+        // Buscar en el mapa local de asegurados
+        const aseguradoEncontrado = aseguradosMap.get(ciBase) || 
+                                   aseguradosMap.get(detalle.ci.trim().toUpperCase()) ||
+                                   aseguradosMap.get(detalle.ci.trim().toLowerCase());
+        
+        if (aseguradoEncontrado) {
+          console.log(`✅ ENCONTRADO EN MAPA LOCAL para CI ${detalle.ci}`);
+          
+          // Verificar coincidencia de CI
+          const ciApi = (aseguradoEncontrado.ASE_CI || '').toString().trim();
+          const complementoApi = (aseguradoEncontrado.ASE_CI_COM || '').trim().toUpperCase();
+          const complementoValido = complementoApi && 
+                                   complementoApi !== '-' && 
+                                   complementoApi !== '' && 
+                                   complementoApi.length > 0;
+          const ciApiCompleto = complementoValido ? `${ciApi}-${complementoApi}` : ciApi;
+          const ciDetalle = detalle.ci.trim().toUpperCase();
+          
+          const comparaciones = [
+            ciDetalle === ciApiCompleto.toUpperCase(),
+            ciDetalle.split('-')[0] === ciApi,
+            ciDetalle === ciApi.toUpperCase(),
+            ciDetalle.toLowerCase() === ciApiCompleto.toLowerCase()
+          ];
+          
+          const coincide = comparaciones.some(comp => comp);
+          
+          if (coincide) {
+            // Mapear datos exitosos
+            detalle.matricula = aseguradoEncontrado.ASE_MAT || null;
+            detalle.tipo_afiliado = aseguradoEncontrado.ASE_COND_EST || null;
+            detalle.asegurado_tipo = aseguradoEncontrado.ASE_TIPO || null;
+            detalle.asegurado_estado = aseguradoEncontrado.ASE_ESTADO || null;
+            
+            if (aseguradoEncontrado.ASE_ESTADO === 'VIGENTE') {
+              estadisticas.encontrados_vigentes++;
+            } else {
+              estadisticas.encontrados_no_vigentes++;
+            }
+            
+            console.log(`✅ CI ${detalle.ci} MAPEADO: Estado=${aseguradoEncontrado.ASE_ESTADO}, Matrícula=${aseguradoEncontrado.ASE_MAT}`);
+          } else {
+            detalle.observaciones_afiliacion = `CI no coincide. Planilla: "${ciDetalle}", API: "${ciApiCompleto}"`;
+            estadisticas.ci_no_coinciden++;
+          }
+        } else {
+          // Fallback: Consultar individualmente
+          const response = await this.externalApiService.getAseguradoByCi(ciBase);
+          
+          if (response.msg && response.msg.trim() !== '') {
+            detalle.observaciones_afiliacion = response.msg.trim();
+            estadisticas.mensajes_especiales++;
+          } else if (response.status === true && response.data && response.data.ASE_CI) {
+            const data = response.data;
+            const ciApi = (data.ASE_CI || '').trim();
+            const complementoApi = (data.ASE_CI_COM || '').trim().toUpperCase();
+            const complementoValido = complementoApi && 
+                                     complementoApi !== '-' && 
+                                     complementoApi !== '' && 
+                                     complementoApi.length > 0;
+            const ciApiCompleto = complementoValido ? `${ciApi}-${complementoApi}` : ciApi;
+            const ciDetalle = detalle.ci.trim().toUpperCase();
+            
+            const comparaciones = [
+              ciDetalle === ciApiCompleto.toUpperCase(),
+              ciDetalle.split('-')[0] === ciApi,
+              ciDetalle === ciApi.toUpperCase()
+            ];
+            
+            const coincide = comparaciones.some(comp => comp);
+            
+            if (coincide) {
+              detalle.matricula = data.ASE_MAT || null;
+              detalle.tipo_afiliado = data.ASE_COND_EST || null;
+              detalle.asegurado_tipo = data.ASE_TIPO || null;
+              detalle.asegurado_estado = data.ASE_ESTADO || null;
+              
+              if (data.ASE_ESTADO === 'VIGENTE') {
+                estadisticas.encontrados_vigentes++;
+              } else {
+                estadisticas.encontrados_no_vigentes++;
+              }
+            } else {
+              detalle.observaciones_afiliacion = `CI no coincide. Planilla: "${ciDetalle}", API: "${ciApiCompleto}"`;
+              estadisticas.ci_no_coinciden++;
+            }
+          } else {
+            detalle.observaciones_afiliacion = 'No se encontró información en el sistema de afiliaciones';
+            estadisticas.no_encontrados++;
+          }
+        }
+
+        estadisticas.total_procesados++;
+        return detalle;
+
+      } catch (error) {
+        console.error(`❌ ERROR para CI ${detalle.ci}: ${error.message}`);
+        
+        detalle.matricula = null;
+        detalle.tipo_afiliado = null;
+        detalle.asegurado_tipo = null;
+        detalle.asegurado_estado = null;
+        detalle.observaciones_afiliacion = `Error de consulta: ${error.message}`;
+        detalle.fecha_ultima_verificacion = new Date();
+        
+        estadisticas.errores_consulta++;
+        estadisticas.total_procesados++;
+        return detalle;
+      }
     };
 
-    // Procesar cada lote
-    for (let indiceLote = 0; indiceLote < lotes.length; indiceLote++) {
-      const lote = lotes[indiceLote];
-      console.log(`🔄 Procesando lote ${indiceLote + 1}/${lotes.length} (${lote.length} registros)`);
-
-      const detallesActualizadosLote = await procesarLoteConControlConcurrencia(lote);
-
+    // 7. Procesar todos los detalles por lotes
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < detalles.length; i += BATCH_SIZE) {
+      const lote = detalles.slice(i, i + BATCH_SIZE);
+      console.log(`🔄 Procesando lote ${Math.floor(i/BATCH_SIZE) + 1} (${lote.length} registros)`);
+      
+      const detallesProcesados = await Promise.all(lote.map(procesarDetalle));
+      
       try {
-        await this.detalleRepo.save(detallesActualizadosLote, { 
-          chunk: 100,
-          reload: false
-        });
-        detallesActualizados += detallesActualizadosLote.length;
-        console.log(`💾 Lote ${indiceLote + 1} guardado exitosamente (${detallesActualizadosLote.length} registros)`);
+        await this.detalleRepo.save(detallesProcesados, { chunk: 100, reload: false });
+        detallesActualizados += detallesProcesados.length;
       } catch (saveError) {
-        console.error(`❌ Error al guardar lote ${indiceLote + 1}:`, saveError);
-        
-        for (const detalle of detallesActualizadosLote) {
+        console.error(`❌ Error al guardar lote:`, saveError);
+        for (const detalle of detallesProcesados) {
           try {
             await this.detalleRepo.save(detalle);
             detallesActualizados++;
           } catch (individualError) {
-            console.error(`❌ Error al guardar registro individual CI ${detalle.ci}:`, individualError);
+            console.error(`❌ Error individual CI ${detalle.ci}:`, individualError);
           }
         }
       }
-
-      if (indiceLote < lotes.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-
-      if ((indiceLote + 1) % 5 === 0) {
-        const progreso = ((indiceLote + 1) / lotes.length * 100).toFixed(1);
-        console.log(`📈 Progreso: ${progreso}% (${indiceLote + 1}/${lotes.length} lotes procesados)`);
+      
+      if (i + BATCH_SIZE < detalles.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
-    // Estadísticas finales mejoradas
-    console.log(`📊 ESTADÍSTICAS FINALES:`);
-    console.log(`   Total procesados: ${estadisticas.total_procesados}`);
-    console.log(`   ✅ Encontrados vigentes: ${estadisticas.encontrados_vigentes}`);
-    console.log(`   ⚠️ Encontrados no vigentes: ${estadisticas.encontrados_no_vigentes}`);
-    console.log(`   📝 Con mensajes especiales: ${estadisticas.mensajes_especiales}`);
-    console.log(`   ❓ No encontrados: ${estadisticas.no_encontrados}`);
-    console.log(`   ❌ CI no coinciden: ${estadisticas.ci_no_coinciden}`);
-    console.log(`   🚨 Errores de consulta: ${estadisticas.errores_consulta}`);
-    console.log(`✅ Verificación completada. Total actualizados: ${detallesActualizados}`);
+    // 8. ANÁLISIS COMPLETO DE TODOS LOS CASOS
+    console.log(`🔍 GENERANDO ANÁLISIS COMPLETO DE TODOS LOS CASOS...`);
 
-    return {
-      mensaje: `Verificación completada exitosamente. Se actualizaron ${detallesActualizados} detalles.`,
-      detallesActualizados,
-      estadisticas
+    // Arrays para los 4 casos
+    const trabajadoresVigentes = [];
+    const trabajadoresNoVigentes = [];
+    const trabajadoresNoEncontrados = [];
+
+    // Procesar detalles para clasificar en los 4 casos
+    detalles.forEach(detalle => {
+      const trabajadorBase = {
+        ci: detalle.ci,
+        nombres: detalle.nombres,
+        apellido_paterno: detalle.apellido_paterno,
+        apellido_materno: detalle.apellido_materno,
+        cargo: detalle.cargo,
+        regional: detalle.regional,
+        salario: detalle.salario,
+        fecha_ingreso: detalle.fecha_ingreso,
+        fecha_retiro: detalle.fecha_retiro,
+        matricula: detalle.matricula,
+        tipo_afiliado: detalle.tipo_afiliado,
+        observaciones_afiliacion: detalle.observaciones_afiliacion
+      };
+
+      if (detalle.asegurado_estado === 'VIGENTE') {
+        // CASO 1: Vigentes
+        trabajadoresVigentes.push({
+          ...trabajadorBase,
+          estado: detalle.asegurado_estado,
+          tipo: detalle.asegurado_tipo
+        });
+      } else if (detalle.asegurado_estado && detalle.asegurado_estado !== 'VIGENTE') {
+        // CASO 2: No vigentes (tienen estado pero no es VIGENTE)
+        trabajadoresNoVigentes.push({
+          ...trabajadorBase,
+          estado: detalle.asegurado_estado,
+          tipo: detalle.asegurado_tipo || 'N/A',
+          motivo: `Estado en API: ${detalle.asegurado_estado}`
+        });
+      } else {
+        // CASO 3: No encontrados (no tienen estado)
+        trabajadoresNoEncontrados.push({
+          ...trabajadorBase,
+          motivo: detalle.observaciones_afiliacion || 'No se encontró información en el sistema de afiliaciones'
+        });
+      }
+    });
+
+    // 9. CÁLCULOS ESPECIALES PARA DOBLE CARGO
+    const personasUnicasEnPlanilla = new Set();
+    const personasVigentesEnPlanilla = new Set();
+
+    detalles.forEach(detalle => {
+      const ciBase = detalle.ci.split('-')[0].trim().toLowerCase();
+      personasUnicasEnPlanilla.add(ciBase);
+      
+      if (detalle.asegurado_estado === 'VIGENTE') {
+        personasVigentesEnPlanilla.add(ciBase);
+      }
+    });
+
+    const registrosConDobleCargo = detalles.length - personasUnicasEnPlanilla.size;
+
+    // Resumen completo
+    const resumenCompleto = {
+      total_planilla: detalles.length,
+      vigentes: trabajadoresVigentes.length,
+      no_vigentes: trabajadoresNoVigentes.length,
+      no_encontrados: trabajadoresNoEncontrados.length,
+      faltantes: trabajadoresFaltantes.length,
+      verificacion_matematica: trabajadoresVigentes.length + trabajadoresNoVigentes.length + trabajadoresNoEncontrados.length === detalles.length
     };
+
+    // 10. Estadísticas finales expandidas
+    console.log(`📊 ESTADÍSTICAS FINALES COMPLETAS:`);
+    console.log(`   📋 DATOS DE LA API:`);
+    console.log(`      Total asegurados en API: ${estadisticas.total_api_asegurados}`);
+    console.log(`      API vigentes: ${estadisticas.total_api_vigentes}`);
+    console.log(`      API no vigentes: ${estadisticas.total_api_no_vigentes}`);
+    console.log(`   📋 DATOS DE LA PLANILLA:`);
+    console.log(`      Total REGISTROS procesados: ${estadisticas.total_procesados}`);
+    console.log(`      Total PERSONAS únicas: ${personasUnicasEnPlanilla.size}`);
+    console.log(`      Registros con doble cargo: ${registrosConDobleCargo}`);
+    console.log(`      ✅ Encontrados vigentes (registros): ${estadisticas.encontrados_vigentes}`);
+    console.log(`      ✅ Personas vigentes únicas: ${personasVigentesEnPlanilla.size}`);
+    console.log(`      ⚠️ Encontrados no vigentes: ${estadisticas.encontrados_no_vigentes}`);
+    console.log(`      📝 Con mensajes especiales: ${estadisticas.mensajes_especiales}`);
+    console.log(`      ❓ No encontrados: ${estadisticas.no_encontrados}`);
+    console.log(`      ❌ CI no coinciden: ${estadisticas.ci_no_coinciden}`);
+    console.log(`      🚨 Errores de consulta: ${estadisticas.errores_consulta}`);
+    console.log(`   🔍 ANÁLISIS DE DIFERENCIAS (PERSONAS, NO REGISTROS):`);
+    console.log(`      ❓ Personas faltantes en planilla: ${estadisticas.trabajadores_faltantes}`);
+    console.log(`      🚫 Excluidos por estado BAJA: ${estadisticas.trabajadores_excluidos_baja}`);
+    console.log(`   📊 RESUMEN DE LOS 4 CASOS:`);
+    console.log(`      ✅ Vigentes: ${resumenCompleto.vigentes}`);
+    console.log(`      ⚠️ No vigentes: ${resumenCompleto.no_vigentes}`);
+    console.log(`      ❓ No encontrados: ${resumenCompleto.no_encontrados}`);
+    console.log(`      📋 Faltantes: ${resumenCompleto.faltantes}`);
+    console.log(`   🧮 VERIFICACIÓN MATEMÁTICA:`);
+    console.log(`      ${resumenCompleto.vigentes} + ${resumenCompleto.no_vigentes} + ${resumenCompleto.no_encontrados} = ${resumenCompleto.vigentes + resumenCompleto.no_vigentes + resumenCompleto.no_encontrados} (debe ser ${resumenCompleto.total_planilla})`);
+    console.log(`      ✅ ¿Suma correcta? ${resumenCompleto.verificacion_matematica ? 'SÍ' : 'NO'}`);
+
+    // ACTUALIZAR LAS ESTADÍSTICAS PARA EL FRONTEND
+    estadisticas.personas_unicas_planilla = personasUnicasEnPlanilla.size;
+    estadisticas.personas_vigentes_planilla = personasVigentesEnPlanilla.size;
+    estadisticas.registros_doble_cargo = registrosConDobleCargo;
+
+    console.log(`✅ Verificación COMPLETA finalizada. Total actualizados: ${detallesActualizados}`);
+
+    // NUEVO: Actualizar fecha de verificación en la planilla
+    try {
+      planilla.fecha_verificacion_afiliacion = new Date();
+      await this.planillaRepo.save(planilla);
+      console.log(`📅 Fecha de verificación actualizada: ${planilla.fecha_verificacion_afiliacion}`);
+    } catch (error) {
+      console.warn(`⚠️ No se pudo actualizar fecha de verificación: ${error.message}`);
+      // No lanzar error, es solo informativo
+    }
+
+    // RETURN COMPLETO CON TODOS LOS DATOS (agregar fecha_verificacion)
+    return {
+      mensaje: `Verificación completa finalizada. Se actualizaron ${detallesActualizados} detalles.`,
+      detallesActualizados,
+      estadisticas,
+      
+      // LOS 4 CASOS PRINCIPALES
+      casos: {
+        vigentes: trabajadoresVigentes,
+        no_vigentes: trabajadoresNoVigentes,
+        no_encontrados: trabajadoresNoEncontrados,
+        faltantes: trabajadoresFaltantes
+      },
+      
+      // RESUMEN EJECUTIVO
+      resumen: {
+        total_planilla: resumenCompleto.total_planilla,
+        vigentes: resumenCompleto.vigentes,
+        no_vigentes: resumenCompleto.no_vigentes,
+        no_encontrados: resumenCompleto.no_encontrados,
+        faltantes: resumenCompleto.faltantes,
+        verificacion_matematica: resumenCompleto.verificacion_matematica
+      },
+
+      fecha_verificacion: planilla.fecha_verificacion_afiliacion,
+      trabajadoresFaltantes
+    };
+
   } catch (error) {
     console.error('❌ Error en verificarAfiliacionDetalles:', error);
     throw new BadRequestException(`Error al verificar afiliación: ${error.message}`);
   }
 }
-
-
-
-//* 30 .- REPORTE AFILIACIONES VIGENTES NO VIGENTES (NOMBRE EN FRONT : REPORTE AFILIACIONES)
-/* async generarReporteAfiliacion(idPlanilla: number): Promise<StreamableFile> {
-  try {
-    // Fetch planilla data
-    const planilla = await this.planillaRepo.findOne({
-      where: { id_planilla_aportes: idPlanilla },
-      relations: ['empresa'],
-    });
-
-    if (!planilla) {
-      throw new BadRequestException('Planilla no encontrada');
-    }
-
-    // Fetch planilla details
-    const detalles = await this.detalleRepo.find({
-      where: { id_planilla_aportes: idPlanilla },
-    });
-
-    if (!detalles || detalles.length === 0) {
-      throw new BadRequestException('No se encontraron detalles para la planilla');
-    }
-
-    // Group details by affiliation status
-    const afiliadosVigentes = detalles
-      .filter((detalle) => detalle.es_afiliado === true)
-      .map((detalle) => ({
-        ci: detalle.ci,
-        apellido_paterno: detalle.apellido_paterno,
-        apellido_materno: detalle.apellido_materno,
-        nombres: detalle.nombres,
-        cargo: detalle.cargo,
-        regional: detalle.regional,
-        salario: detalle.salario,
-      }));
-
-    const afiliadosNoVigentes = detalles
-      .filter((detalle) => detalle.es_afiliado === false)
-      .map((detalle) => ({
-        ci: detalle.ci,
-        apellido_paterno: detalle.apellido_paterno,
-        apellido_materno: detalle.apellido_materno,
-        nombres: detalle.nombres,
-        cargo: detalle.cargo,
-        regional: detalle.regional,
-        salario: detalle.salario,
-      }));
-
-    // Prepare data for Carbone
-    moment.locale('es');
-    const data = {
-      planilla: {
-        id_planilla_aportes: planilla.id_planilla_aportes,
-        mes: moment(planilla.fecha_planilla).format('MMMM').toUpperCase(),
-        anio: planilla.gestion,
-        fecha_planilla: moment(planilla.fecha_planilla).format('DD/MM/YYYY'),
-        total_trabaj: planilla.total_trabaj,
-        total_importe: planilla.total_importe,
-      },
-      afiliadosVigentes,
-      afiliadosNoVigentes,
-      totales: {
-        vigentes: afiliadosVigentes.length,
-        noVigentes: afiliadosNoVigentes.length,
-        total: detalles.length,
-      },
-    };
-
-    console.log('Datos para el reporte de afiliación:', JSON.stringify(data, null, 2));
-
-    const templatePath = path.resolve('reports/reporte_afiliacion.docx');
-
-    // Verify template exists
-    if (!fs.existsSync(templatePath)) {
-      throw new BadRequestException(`La plantilla en ${templatePath} no existe`);
-    }
-
-    return new Promise<StreamableFile>((resolve, reject) => {
-      carbone.render(
-        templatePath,
-        data,
-        { convertTo: 'pdf' },
-        (err, result) => {
-          if (err) {
-            console.error('Error en Carbone:', err);
-            return reject(new BadRequestException(`Error al generar el reporte: ${err}`));
-          }
-
-          console.log('Reporte de afiliación generado correctamente');
-
-          if (typeof result === 'string') {
-            result = Buffer.from(result, 'utf-8');
-          }
-
-          resolve(
-            new StreamableFile(result, {
-              type: 'application/pdf',
-              disposition: `attachment; filename=reporte_afiliacion_${idPlanilla}.pdf`,
-            }),
-          );
-        },
-      );
-    });
-  } catch (error) {
-    throw new BadRequestException(`Error al generar el reporte de afiliación: ${error.message}`);
-  }
-
-
-
-} */
 
 //* 31.- REPORTE DE DETALLES DE PLANILLA EN EXCEL (NOMBRE EN FRONT : PLANILLA EXCEL)
 async generarReporteDetallesExcel(idPlanilla: number): Promise<StreamableFile> {
@@ -4358,6 +4572,63 @@ async obtenerResumenConAdicionales(idPlanillaMensual: number) {
     trabajadores_combinado: totalTrabajadores,
   };
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// NUEVO MÉTODO: Buscar planilla del mes anterior usando fecha_planilla
+async buscarPlanillaMesAnterior(codPatronal: string, fechaActual: Date): Promise<any> {
+  try {
+    // Calcular el primer y último día del mes anterior
+    const fechaMesAnterior = new Date(fechaActual);
+    fechaMesAnterior.setMonth(fechaMesAnterior.getMonth() - 1);
+    
+    // Primer día del mes anterior
+    const primerDia = new Date(fechaMesAnterior.getFullYear(), fechaMesAnterior.getMonth(), 1);
+    
+    // Último día del mes anterior
+    const ultimoDia = new Date(fechaMesAnterior.getFullYear(), fechaMesAnterior.getMonth() + 1, 0);
+    
+    console.log(`🔍 Buscando planilla mes anterior:
+      - Cod Patronal: ${codPatronal}
+      - Rango fechas: ${primerDia.toISOString().split('T')[0]} a ${ultimoDia.toISOString().split('T')[0]}`);
+
+    const planilla = await this.planillaRepo.findOne({
+      where: {
+        cod_patronal: codPatronal,
+        fecha_planilla: Between(primerDia, ultimoDia),
+        estado: Not(0) // No incluir borradas
+      },
+      order: {
+        fecha_planilla: 'DESC', // La más reciente del mes
+        fecha_creacion: 'DESC'
+      }
+    });
+
+    if (planilla) {
+      console.log(`✅ Planilla encontrada: ID ${planilla.id_planilla_aportes}, Fecha: ${planilla.fecha_planilla}`);
+    } else {
+      console.log(`❌ No se encontró planilla del mes anterior`);
+    }
+
+    return planilla;
+  } catch (error) {
+    console.error('Error al buscar planilla del mes anterior:', error);
+    return null;
+  }
+}
+
+
 
 
 

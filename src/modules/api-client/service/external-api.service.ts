@@ -136,7 +136,7 @@ export class ExternalApiService {
     }, 'getAllEmpresas');
   }
 
-  async getAseguradosByNroPatronal(npatronal: string): Promise<any> {
+  /* async getAseguradosByNroPatronal(npatronal: string): Promise<any> {
     console.log("🔍 Llamando a getAseguradosByNroPatronal con nroPatronal:", npatronal);
     
     return await this.handleRequest(async () => {
@@ -152,7 +152,7 @@ export class ExternalApiService {
       
       return response.data.datosAsegurado;
     }, 'getAseguradosByNroPatronal');
-  }
+  } */
 
   async getAseguradoByCi(ci: string): Promise<any> {
     console.log("🔍 Llamando a getAseguradoByCi con CI:", ci);
@@ -199,4 +199,55 @@ export class ExternalApiService {
       }
     }, 'getAseguradoByMatricula');
   }
+
+  async getAllAseguradosByNroPatronal(npatronal: string): Promise<any> {
+  console.log("Llamando a getAllAseguradosByNroPatronal con nroPatronal:", npatronal);
+  
+  if (!this.apiToken) {
+    console.error('Token no disponible en getAllAseguradosByNroPatronal');
+    throw new Error('Token no disponible');
+  }
+
+  const url = `${this.baseUrl}/modelo/getAllAseguradosByNroPatronal/${npatronal}`;
+  console.log("URL de consulta:", url);
+
+  try {
+    const response = await firstValueFrom(
+      this.httpService.get(url, {
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
+      }),
+    );
+    
+    console.log(`✅ Respuesta exitosa para patrón ${npatronal}:`, {
+      status: response.data.ok,
+      totalAsegurados: response.data.datosAsegurado?.length || 0
+    });
+
+    if (response.data.ok && response.data.datosAsegurado) {
+      return {
+        status: true,
+        data: response.data.datosAsegurado,
+        total: response.data.datosAsegurado.length,
+        npatronal: response.data.npatronal
+      };
+    } else {
+      return {
+        status: false,
+        data: [],
+        total: 0,
+        msg: response.data.msg || 'No se encontraron asegurados para este número patronal'
+      };
+    }
+
+  } catch (error) {
+    console.error("Error al obtener asegurados por número patronal:", error);
+    throw new Error(`Error al obtener asegurados por número patronal: ${error.message}`);
+  }
+}
+
+
+
+
 }

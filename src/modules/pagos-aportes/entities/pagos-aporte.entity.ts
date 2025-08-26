@@ -1,9 +1,16 @@
-import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+// REEMPLAZAR COMPLETAMENTE en: src/modules/pagos-aportes/entities/pagos-aporte.entity.ts
+
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { PlanillasAporte } from '../../planillas_aportes/entities/planillas_aporte.entity'; 
 
 @Entity({ schema: 'transversales', name: 'pagos_aportes_mensuales' })
 export class PagoAporte {
-  @PrimaryColumn()
+  // CAMBIO: Ahora es PrimaryGeneratedColumn en lugar de PrimaryColumn
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  // CAMBIO: Ahora es Column normal, no PrimaryColumn
+  @Column()
   id_planilla_aportes: number;
 
   @Column({ type: 'timestamp' })
@@ -11,6 +18,9 @@ export class PagoAporte {
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   monto_pagado: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  monto_demasia: number;
 
   @Column({ nullable: true })
   metodo_pago: string;

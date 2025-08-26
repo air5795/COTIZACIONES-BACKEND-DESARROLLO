@@ -18,18 +18,16 @@ export class NotificacionesController {
   @ApiResponse({ status: 400, description: 'Parámetros inválidos' })
   async obtenerNotificaciones(
     @Param('id_usuario') id_usuario: string,
-    @Query('leido') leido?: string, // Cambiar a string para manejar 'true'/'false'
+    @Query('leido') leido?: string, 
     @Query('pagina') pagina: number = 1,
     @Query('limite') limite: number = 10,
   ) {
     try {
-      // Convertir string a boolean si se proporciona
+
       let leidoBoolean: boolean | undefined = undefined;
       if (leido !== undefined && leido !== '') {
         leidoBoolean = leido === 'true';
       }
-
-      // Validar parámetros
       const paginaNum = Number(pagina) || 1;
       const limiteNum = Number(limite) || 10;
 
@@ -47,7 +45,7 @@ export class NotificacionesController {
       return {
         notificaciones: resultado.notificaciones,
         total: resultado.total,
-        totalNotificaciones: resultado.total, // Para compatibilidad con frontend
+        totalNotificaciones: resultado.total,
         pagina: paginaNum,
         limite: limiteNum,
         totalPaginas: Math.ceil(resultado.total / limiteNum)

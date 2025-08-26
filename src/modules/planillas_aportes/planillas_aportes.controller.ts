@@ -1023,8 +1023,8 @@ async generarReporteHistorial(
 // 28 .- VERIFICAR AFILIACIÓN DE DETALLES - ENDPOINT ACTUALIZADO
 @Post('verificar-afiliacion/:id_planilla')
 @ApiOperation({ 
-  summary: 'Verificar afiliación de trabajadores con API externa SIIGA-H',
-  description: 'Procesa todos los trabajadores de una planilla por lotes para verificar su estado de afiliación contra la API externa. Actualiza matricula, tipo_afiliado, asegurado_tipo y asegurado_estado.'
+  summary: 'Verificación completa de afiliaciones con detección de faltantes',
+  description: 'Obtiene todos los asegurados del número patronal, verifica los trabajadores de la planilla y detecta quiénes faltan (excluyendo trabajadores dados de BAJA). Procesa por lotes para mejorar rendimiento.'
 })
 @ApiParam({ 
   name: 'id_planilla', 
@@ -1034,28 +1034,51 @@ async generarReporteHistorial(
 })
 @ApiResponse({ 
   status: 200, 
-  description: 'Verificación completada con éxito',
+  description: 'Verificación completa exitosa',
   schema: {
     type: 'object',
     properties: {
       mensaje: {
         type: 'string',
-        example: 'Verificación completada exitosamente. Se actualizaron 150 detalles con información de afiliación.'
+        example: 'Verificación completa finalizada. Se actualizaron 150 detalles. Se encontraron 5 trabajadores faltantes en la planilla.'
       },
       detallesActualizados: {
         type: 'number',
         example: 150
       },
-      tiempoEjecucion: {
-        type: 'string',
-        example: '2.5 minutos'
-      }
+      estadisticas: {
+        type: 'object',
+        properties: {
+          total_procesados: { type: 'number', example: 150 },
+          encontrados_vigentes: { type: 'number', example: 145 },
+          encontrados_no_vigentes: { type: 'number', example: 3 },
+          total_api_asegurados: { type: 'number', example: 155 },
+          trabajadores_faltantes: { type: 'number', example: 5 },
+          trabajadores_excluidos_baja: { type: 'number', example: 2 }
+        }
+      },
+      trabajadoresFaltantes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            ci: { type: 'string', example: '1234567-LP' },
+            nombres: { type: 'string', example: 'JUAN CARLOS' },
+            apellido_paterno: { type: 'string', example: 'PEREZ' },
+            apellido_materno: { type: 'string', example: 'LOPEZ' },
+            matricula: { type: 'string', example: '12-3456 ABC' },
+            cargo: { type: 'string', example: 'TÉCNICO' },
+            estado: { type: 'string', example: 'VIGENTE' }
+          }
+        }
+      },
+      tiempoEjecucion: { type: 'string', example: '3.2 minutos' }
     }
   }
 })
 @ApiResponse({ 
   status: 400, 
-  description: 'Error al verificar afiliación',
+  description: 'Error en la verificación',
   schema: {
     type: 'object',
     properties: {
@@ -1065,30 +1088,19 @@ async generarReporteHistorial(
     }
   }
 })
-@ApiResponse({ 
-  status: 404, 
-  description: 'Planilla no encontrada',
-  schema: {
-    type: 'object',
-    properties: {
-      statusCode: { type: 'number', example: 404 },
-      message: { type: 'string', example: 'No se encontraron detalles para la planilla especificada' },
-      error: { type: 'string', example: 'Not Found' }
-    }
-  }
-})
 async verificarAfiliacionDetalles(@Param('id_planilla', ParseIntPipe) id_planilla: number) {
   try {
     const inicioTiempo = Date.now();
     
-    console.log(`🚀 Iniciando verificación de afiliaciones para planilla ${id_planilla}`);
+    console.log(`🚀 Iniciando verificación COMPLETA de afiliaciones para planilla ${id_planilla}`);
     
     const resultado = await this.planillasAportesService.verificarAfiliacionDetalles(id_planilla);
     
     const tiempoTranscurrido = Date.now() - inicioTiempo;
     const tiempoEnMinutos = (tiempoTranscurrido / 60000).toFixed(1);
     
-    console.log(`✅ Verificación completada en ${tiempoEnMinutos} minutos`);
+    console.log(`✅ Verificación completa finalizada en ${tiempoEnMinutos} minutos`);
+    console.log(`📊 Resumen: ${resultado.detallesActualizados} actualizados, ${resultado.trabajadoresFaltantes.length} faltantes`);
     
     return {
       ...resultado,
@@ -1096,19 +1108,46 @@ async verificarAfiliacionDetalles(@Param('id_planilla', ParseIntPipe) id_planill
       timestamp: new Date().toISOString()
     };
   } catch (error) {
-    console.error(`❌ Error en verificación de afiliaciones para planilla ${id_planilla}:`, error);
+    console.error(`❌ Error en verificación completa de afiliaciones para planilla ${id_planilla}:`, error);
     
-    // Distinguir entre diferentes tipos de errores
     if (error instanceof BadRequestException) {
       throw error;
     } else if (error instanceof NotFoundException) {
       throw error;
     } else {
-      // Error genérico/interno
       throw new BadRequestException(
         `Error interno al verificar afiliaciones: ${error.message || 'Error desconocido'}`
       );
     }
+  }
+}
+
+// ENDPOINT ADICIONAL: Ver trabajadores faltantes
+@Get('trabajadores-faltantes/:id_planilla')
+@ApiOperation({ 
+  summary: 'Obtener solo la lista de trabajadores faltantes',
+  description: 'Devuelve únicamente los trabajadores que están en la API pero no en la planilla (excluyendo BAJA)'
+})
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla de aportes', type: Number })
+@ApiResponse({ status: 200, description: 'Lista de trabajadores faltantes' })
+async obtenerTrabajadoresFaltantes(@Param('id_planilla', ParseIntPipe) id_planilla: number) {
+  try {
+    // Reutilizar la lógica del servicio principal pero solo devolver faltantes
+    const resultado = await this.planillasAportesService.verificarAfiliacionDetalles(id_planilla);
+    
+    return {
+      mensaje: `Se encontraron ${resultado.trabajadoresFaltantes.length} trabajadores faltantes`,
+      total_faltantes: resultado.trabajadoresFaltantes.length,
+      trabajadores_faltantes: resultado.trabajadoresFaltantes,
+      estadisticas_resumen: {
+        total_api_asegurados: resultado.estadisticas.total_api_asegurados,
+        total_planilla: resultado.estadisticas.total_procesados,
+        vigentes_api: resultado.estadisticas.total_api_vigentes,
+        excluidos_baja: resultado.estadisticas.trabajadores_excluidos_baja
+      }
+    };
+  } catch (error) {
+    throw new BadRequestException(`Error al obtener trabajadores faltantes: ${error.message}`);
   }
 }
 

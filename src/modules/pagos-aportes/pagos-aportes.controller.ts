@@ -100,4 +100,24 @@ export class PagosAportesController {
 
 
 
+
+
+
+
+  // NUEVO ENDPOINT: Obtener demasía del mes anterior
+@Get('demasia-mes-anterior/:id_planilla')
+@ApiOperation({ summary: 'Obtener demasía del mes anterior para una planilla' })
+@ApiParam({ name: 'id_planilla', description: 'ID de la planilla actual', type: Number })
+@ApiResponse({ status: 200, description: 'Demasía obtenida exitosamente', type: Number })
+@ApiResponse({ status: 400, description: 'Error al obtener la demasía' })
+async obtenerDemasiaMesAnterior(@Param('id_planilla') id_planilla: number): Promise<number> {
+  try {
+    return await this.pagosAportesService.obtenerDemasiaMesAnterior(id_planilla);
+  } catch (error) {
+    throw new BadRequestException(`Error al obtener demasía del mes anterior: ${error.message}`);
+  }
+}
+
+
+
 }

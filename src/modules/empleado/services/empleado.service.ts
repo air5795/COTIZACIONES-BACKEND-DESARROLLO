@@ -44,10 +44,10 @@ export class EmpleadoService {
     }
     //console.log(empPatronal);
     const aseguradosData =
-      await this._apiExternaService.getAseguradosByNroPatronal(empPatronal);
+      await this._apiExternaService.getAllAseguradosByNroPatronal(empPatronal);
     // Leer y validar el archivo Excel sin guardarlo
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(file.buffer);
+/*     await workbook.xlsx.load(file.buffer); */
     const worksheet = workbook.getWorksheet(1); //Lee la hoja 1 del archivo
 
     const safeToString = (value: any): string | null =>
@@ -494,7 +494,7 @@ export class EmpleadoService {
       ResponseUtil.error(empresa.message);
     }
     const aseguradosData =
-      await this._apiExternaService.getAseguradosByNroPatronal(
+      await this._apiExternaService.getAllAseguradosByNroPatronal(
         dto.empNpatronal,
       );
 
@@ -589,7 +589,7 @@ export class EmpleadoService {
       ResponseUtil.error(empresa.message);
     }
     const aseguradosData =
-      await this._apiExternaService.getAseguradosByNroPatronal(empPatronal);
+      await this._apiExternaService.getAllAseguradosByNroPatronal(empPatronal);
 
     const conteoEstados = aseguradosData.reduce(
       (acumulador, asegurado) => {
@@ -707,7 +707,7 @@ export class EmpleadoService {
     }
 
     const aseguradosData =
-      await this._apiExternaService.getAseguradosByNroPatronal(empPatronal);
+      await this._apiExternaService.getAllAseguradosByNroPatronal(empPatronal);
 
     const conteoEstados = aseguradosData.reduce(
       (acumulador, asegurado) => {

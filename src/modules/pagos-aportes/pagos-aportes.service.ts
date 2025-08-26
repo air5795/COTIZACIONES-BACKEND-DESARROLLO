@@ -16,11 +16,12 @@ export class PagosAportesService {
   constructor(
     @InjectRepository(PagoAporte)
     private readonly pagoAporteRepository: Repository<PagoAporte>,
+    
     private planillasAportesService: PlanillasAportesService,
   ) {}
 
   // 1.- CREAR EN BASE DE DATOS EL PAGO Y ACTUALIZAR FECHA_PAGO EN PLANILLAS_APORTES
-  async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Promise<PagoAporte> {
+  /* async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Promise<PagoAporte> {
     const queryRunner = this.pagoAporteRepository.manager.connection.createQueryRunner();
 
     await queryRunner.startTransaction();
@@ -84,8 +85,153 @@ export class PagosAportesService {
     } finally {
       await queryRunner.release();
     }
-  }
+  } */
   
+// 1. MÉTODO CREATEPAGO ACTUALIZADO
+async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Promise<PagoAporte> {
+  const queryRunner = this.pagoAporteRepository.manager.connection.createQueryRunner();
+
+  await queryRunner.startTransaction();
+  try {
+    let nuevoPago: PagoAporte;
+
+    if (file) {
+      const filePath = join('pagos-imagenes', file.filename);
+      pagoData.foto_comprobante = filePath;
+      console.log('Archivo guardado en:', filePath);
+    }
+
+    // Crear y guardar el nuevo pago
+    nuevoPago = this.pagoAporteRepository.create(pagoData);
+    await queryRunner.manager.save(nuevoPago);
+
+    // Actualizar la fecha_pago en planillas_aportes
+    const idPlanilla = pagoData.id_planilla_aportes;
+    if (idPlanilla) {
+      const fechaPago = pagoData.fecha_pago ? new Date(pagoData.fecha_pago) : new Date();
+      
+      // Obtener los datos de la preliquidación
+      const datosLiquidacion = await this.planillasAportesService.calcularAportesPreliminar(
+        idPlanilla, 
+        fechaPago
+      );
+
+      // Actualizar TODOS los campos calculados en la planilla
+      await this.planillasAportesService.actualizarPlanillaConLiquidacion(
+        idPlanilla, 
+        fechaPago, 
+        datosLiquidacion
+      );
+
+      // LÓGICA ACTUALIZADA PARA MANEJAR DEMASÍA usando fecha_planilla
+      const montoPagado = Number(pagoData.monto_pagado || 0);
+      const totalCancelar = Number(datosLiquidacion.total_a_cancelar || 0);
+
+      // Verificar si hay demasía del mes anterior usando el método actualizado
+      const demasiaAnterior = await this.obtenerDemasiaMesAnterior(idPlanilla);
+      
+      // Calcular el total real a pagar (descontando demasía anterior)
+      const totalConDescuento = Math.max(0, totalCancelar - demasiaAnterior);
+      
+      console.log('Cálculo de demasía actualizado:', {
+        montoPagado,
+        totalCancelar,
+        demasiaAnterior,
+        totalConDescuento
+      });
+
+      // Si el monto pagado es mayor al total con descuento, generar nueva demasía
+      if (montoPagado > totalConDescuento) {
+        const nuevaDemasia = montoPagado - totalConDescuento;
+        
+        // Actualizar el pago con la nueva demasía
+        nuevoPago.monto_demasia = nuevaDemasia;
+        await queryRunner.manager.save(nuevoPago);
+        
+        console.log(`✅ Demasía generada: ${nuevaDemasia}`);
+      }
+
+    } else {
+      throw new BadRequestException('El id_planilla_aportes es requerido.');
+    }
+
+    await queryRunner.commitTransaction();
+    return nuevoPago;
+  } catch (error) {
+    await queryRunner.rollbackTransaction();
+    if (file && file.filename) {
+      const filePath = join(process.cwd(), 'pagos-aportes', 'pagos', file.filename);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+    throw new BadRequestException('Error al crear el pago: ' + error.message);
+  } finally {
+    await queryRunner.release();
+  }
+}
+
+// 2. NUEVO MÉTODO: Obtener demasía del mes anterior
+async obtenerDemasiaMesAnterior(idPlanillaActual: number): Promise<number> {
+  try {
+    // Obtener datos de la planilla actual
+    const planillaActual = await this.planillasAportesService.obtenerPlanilla(idPlanillaActual);
+    if (!planillaActual?.planilla) {
+      console.log('❌ No se encontró la planilla actual');
+      return 0;
+    }
+
+    const codPatronal = planillaActual.planilla.cod_patronal;
+    const fechaPlanilla = planillaActual.planilla.fecha_planilla;
+    
+    if (!fechaPlanilla) {
+      console.log('❌ La planilla actual no tiene fecha_planilla');
+      return 0;
+    }
+
+    console.log(`🔍 Buscando demasía para:
+      - Planilla actual: ${idPlanillaActual}
+      - Cod Patronal: ${codPatronal}
+      - Fecha actual: ${fechaPlanilla}`);
+
+    // Buscar la planilla del mes anterior usando fecha_planilla
+    const planillaAnterior = await this.planillasAportesService.buscarPlanillaMesAnterior(
+      codPatronal, 
+      new Date(fechaPlanilla)
+    );
+
+    if (!planillaAnterior) {
+      console.log('❌ No se encontró planilla del mes anterior');
+      return 0;
+    }
+
+    console.log(`✅ Planilla anterior encontrada: ID ${planillaAnterior.id_planilla_aportes}`);
+
+    // Buscar el pago de la planilla anterior
+    const pagoAnterior = await this.pagoAporteRepository.findOne({
+      where: { id_planilla_aportes: planillaAnterior.id_planilla_aportes },
+      order: { fecha_creacion: 'DESC' }
+    });
+
+    if (!pagoAnterior) {
+      console.log('❌ No se encontró pago para la planilla anterior');
+      return 0;
+    }
+
+    const demasiaAnterior = pagoAnterior.monto_demasia || 0;
+    console.log(`💰 Demasía encontrada: ${demasiaAnterior}`);
+
+    return demasiaAnterior;
+  } catch (error) {
+    console.error('Error al obtener demasía del mes anterior:', error);
+    return 0;
+  }
+}
+
+
+
+
+
   // 2.- LISTAR TODOS LOS PAGOS
   async findAll() {
     try {

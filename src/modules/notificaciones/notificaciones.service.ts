@@ -10,7 +10,7 @@ import { UpdateNotificacioneDto } from './dto/update-notificacione.dto';
 export class NotificacionesService {
   constructor(
     @InjectRepository(Notificacion)
-    public notificacionesRepo: Repository<Notificacion>, // ← CAMBIAR private por public
+    public notificacionesRepo: Repository<Notificacion>,
   ) {}
 
   async crearNotificacion(dto: CreateNotificacioneDto): Promise<Notificacion> {

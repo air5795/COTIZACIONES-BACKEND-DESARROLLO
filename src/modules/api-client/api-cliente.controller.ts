@@ -29,10 +29,16 @@ export class ApiClientController {
     return this.externalApiService.getAseguradoByMatricula(mat);
   }
 
-  @ApiBearerAuth()
+/*   @ApiBearerAuth()
 @Get('GetEmpresaByNroPatronal/:npatronal')
 GetEmpresaByNroPatronal(@Param('npatronal') npatronal: string) {
   return this.externalApiService.getEmpresaByNroPatronal(npatronal);
+} */
+
+@ApiBearerAuth()
+@Get('GetAllAseguradosByNroPatronal/:npatronal')
+GetAllAseguradosByNroPatronal(@Param('npatronal') npatronal: string) {
+  return this.externalApiService.getAllAseguradosByNroPatronal(npatronal);
 }
 
 @ApiBearerAuth()
