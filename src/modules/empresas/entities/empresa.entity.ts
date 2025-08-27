@@ -1,5 +1,6 @@
 import { Entity, Column, PrimaryGeneratedColumn, OneToMany } from 'typeorm';
 import { PlanillasAporte } from 'src/modules/planillas_aportes/entities/planillas_aporte.entity';
+import { IncapacidadesReembolsoDetalle } from '../../incapacidades-reembolso/entities/incapacidades-reembolso-detalle.entity';
 
 @Entity({ schema: 'transversales', name: 'empresa' })
 export class Empresa {
@@ -92,4 +93,8 @@ export class Empresa {
 
   @OneToMany(() => PlanillasAporte, (planilla) => planilla.empresa)
   planillasAportes: PlanillasAporte[];
+
+  @OneToMany(() => IncapacidadesReembolsoDetalle, incapacidad => incapacidad.planillaDetalleOrigen)
+  incapacidadesGeneradas: IncapacidadesReembolsoDetalle[];
+
 }

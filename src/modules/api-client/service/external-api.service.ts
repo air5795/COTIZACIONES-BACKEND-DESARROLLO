@@ -247,6 +247,45 @@ export class ExternalApiService {
   }
 }
 
+async buscarBajasMedicas(matricula: string): Promise<any> {
+  console.log("Llamando a getCertificadoIncapacidadByParamMat con matricula:", matricula);
+  
+  if (!this.apiToken) {
+    console.error('Token no disponible en getCertificadoIncapacidadByParamMat');
+    throw new Error('Token no disponible');
+  }
+
+  const url = `${this.baseUrl}/gestion/getCertificadoIncapacidadByParamMat/${matricula}`;
+  console.log("URL de consulta:", url);
+
+  try {
+    const response = await firstValueFrom(
+      this.httpService.get(url, {
+        headers: { Authorization: `Bearer ${this.apiToken}` },
+      }),
+    );
+
+    if (response.data?.bajasDB?.length > 0) {
+      return {
+        ok: true,
+        bajasDB: response.data.bajasDB
+      };
+    } else {
+      return {
+        ok: true,
+        bajasDB: []
+      };
+    }
+  } catch (error) {
+    console.error('Error en buscarBajasMedicas:', error);
+    return {
+      ok: false,
+      bajasDB: [],
+      message: `Error al consultar bajas médicas: ${error.message}`
+    };
+  }
+}
+
 
 
 

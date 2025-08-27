@@ -47,5 +47,11 @@ GetAllEmpresas() {
   return this.externalApiService.getAllEmpresas();
 }
 
+@ApiBearerAuth()
+@Get('GetCertificadoIncapacidadByParamMat/:matricula')
+GetCertificadoIncapacidadByParamMat(@Param('matricula') matricula: string) {
+  return this.externalApiService.buscarBajasMedicas(matricula);
+}
+
 
 }

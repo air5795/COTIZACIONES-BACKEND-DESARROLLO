@@ -1,26 +1,48 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { TiposIncapacidad } from './entities/tipos-incapacidad.entity';
 import { CreateTiposIncapacidadDto } from './dto/create-tipos-incapacidad.dto';
 import { UpdateTiposIncapacidadDto } from './dto/update-tipos-incapacidad.dto';
 
 @Injectable()
 export class TiposIncapacidadService {
-  create(createTiposIncapacidadDto: CreateTiposIncapacidadDto) {
-    return 'This action adds a new tiposIncapacidad';
+  constructor(
+    @InjectRepository(TiposIncapacidad)
+    private tiposRepo: Repository<TiposIncapacidad>,
+  ) {}
+
+  async create(createDto: CreateTiposIncapacidadDto) {
+    const tipo = this.tiposRepo.create(createDto);
+    return await this.tiposRepo.save(tipo);
   }
 
-  findAll() {
-    return `This action returns all tiposIncapacidad`;
+  async findAll() {
+    return await this.tiposRepo.find({
+      where: { activo: true },
+      order: { codigo: 'ASC' },
+    });
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} tiposIncapacidad`;
+  async findOne(id: number) {
+    return await this.tiposRepo.findOne({
+      where: { id_tipo_incapacidad: id, activo: true },
+    });
   }
 
-  update(id: number, updateTiposIncapacidadDto: UpdateTiposIncapacidadDto) {
-    return `This action updates a #${id} tiposIncapacidad`;
+  async findByCode(codigo: string) {
+    return await this.tiposRepo.findOne({
+      where: { codigo, activo: true },
+    });
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} tiposIncapacidad`;
+  async update(id: number, updateDto: UpdateTiposIncapacidadDto) {
+    await this.tiposRepo.update(id, updateDto);
+    return this.findOne(id);
+  }
+
+  async remove(id: number) {
+    await this.tiposRepo.update(id, { activo: false });
+    return { message: 'Tipo de incapacidad desactivado' };
   }
 }
