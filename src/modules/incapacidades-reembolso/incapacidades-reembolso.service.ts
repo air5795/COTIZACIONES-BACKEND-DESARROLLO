@@ -37,16 +37,13 @@ export class IncapacidadesReembolsoService {
     try {
       // Extraer mes y gestión de la fecha
       const fecha = new Date(createDto.fecha_planilla);
-      const meses = [
-        'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
-        'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
-      ];
-      
+      const mesNumerico = (fecha.getMonth() + 1).toString().padStart(2, '0'); // 01, 02, 03...
+
       const planilla = this.incapacidadesRepo.create({
         ...createDto,
-        mes: meses[fecha.getMonth()],
+        mes: mesNumerico,
         gestion: fecha.getFullYear().toString(),
-        estado: 0, // BORRADOR (tu sistema: 0=BORRADOR, 1=PRESENTADO, 2=APROBADO)
+        estado: 0, // BORRADOR en tu sistema
         usuario_creacion: usuarioCreacion,
         nombre_creacion: usuarioCreacion,
       });
@@ -117,7 +114,7 @@ export class IncapacidadesReembolsoService {
       throw new NotFoundException(`Planilla con ID ${id} no encontrada`);
     }
 
-    if (planilla.estado !== 1) {
+    if (planilla.estado === 0) {
       throw new BadRequestException('Solo se pueden modificar planillas en estado BORRADOR');
     }
 
@@ -140,7 +137,7 @@ export class IncapacidadesReembolsoService {
       throw new NotFoundException(`Planilla con ID ${id} no encontrada`);
     }
 
-    if (planilla.estado !== 1) {
+    if (planilla.estado === 0) {
       throw new BadRequestException('Solo se pueden presentar planillas en estado BORRADOR');
     }
 
@@ -149,7 +146,7 @@ export class IncapacidadesReembolsoService {
     }
 
     await this.incapacidadesRepo.update(id, {
-      estado: 2, // PRESENTADO
+      estado: 1, // PRESENTADO
       fecha_presentacion: new Date(),
       usuario_modificacion: usuarioModificacion,
       fecha_modificacion: new Date(),
@@ -167,12 +164,12 @@ export class IncapacidadesReembolsoService {
       throw new NotFoundException(`Planilla con ID ${id} no encontrada`);
     }
 
-    if (planilla.estado !== 2) {
+    if (planilla.estado !== 1) {
       throw new BadRequestException('Solo se pueden aprobar planillas en estado PRESENTADO');
     }
 
     await this.incapacidadesRepo.update(id, {
-      estado: 3, // APROBADO
+      estado: 2, // APROBADO
       fecha_aprobacion: new Date(),
       usuario_aprobacion: usuarioAprobacion,
       usuario_modificacion: usuarioAprobacion,
@@ -201,7 +198,7 @@ export class IncapacidadesReembolsoService {
         throw new NotFoundException('Planilla no encontrada');
       }
 
-      if (planilla.estado !== 1) {
+      if (planilla.estado !== 0) {
         throw new BadRequestException('Solo se pueden agregar trabajadores a planillas en BORRADOR');
       }
 
@@ -224,13 +221,19 @@ export class IncapacidadesReembolsoService {
         tipoIncapacidad.cotizaciones_minimas
       );
 
+      // Convertir fechas de string a Date si es necesario
+      const fechaBajaInicio = new Date(createDto.fecha_baja_medica_inicio);
+      const fechaBajaFin = new Date(createDto.fecha_baja_medica_fin);
+      const fechaCotizacionDel = new Date(createDto.fecha_cotizacion_del);
+      const fechaCotizacionAl = new Date(createDto.fecha_cotizacion_al);
+
       // Calcular datos financieros
       const calculosFinancieros = this.calcularReembolso({
-        fechaBajaInicio: createDto.fecha_baja_medica_inicio,
-        fechaBajaFin: createDto.fecha_baja_medica_fin,
+        fechaBajaInicio: fechaBajaInicio,
+        fechaBajaFin: fechaBajaFin,
         diasIncapacidad: createDto.dias_incapacidad_inicial,
-        fechaCotizacionDel: createDto.fecha_cotizacion_del,
-        fechaCotizacionAl: createDto.fecha_cotizacion_al,
+        fechaCotizacionDel: fechaCotizacionDel,
+        fechaCotizacionAl: fechaCotizacionAl,
         salarioTotal: salarioTotal,
         porcentajeReembolso: tipoIncapacidad.porcentaje_reembolso,
         diasCarencia: tipoIncapacidad.dias_carencia,
@@ -337,7 +340,7 @@ export class IncapacidadesReembolsoService {
   private async obtenerSalarioTrabajador(matricula: string, fechaPlanilla: Date): Promise<number> {
     // Query para buscar el salario más reciente del trabajador
     const query = `
-      SELECT pad.salario
+      SELECT pad.salario, pa.fecha_planilla
       FROM transversales.planilla_aportes_detalles pad
       INNER JOIN transversales.planillas_aportes pa ON pad.id_planilla_aportes = pa.id_planilla_aportes
       WHERE pad.matricula = $1 
@@ -350,9 +353,28 @@ export class IncapacidadesReembolsoService {
     const result = await this.dataSource.query(query, [matricula, fechaPlanilla]);
     
     if (!result || result.length === 0) {
-      throw new BadRequestException(`No se encontró salario para el trabajador con matrícula ${matricula}`);
+      // Si no encuentra con la fecha límite, buscar el más reciente sin límite
+      const queryAlternativo = `
+        SELECT pad.salario, pa.fecha_planilla
+        FROM transversales.planilla_aportes_detalles pad
+        INNER JOIN transversales.planillas_aportes pa ON pad.id_planilla_aportes = pa.id_planilla_aportes
+        WHERE pad.matricula = $1 
+          AND pa.estado = 2
+        ORDER BY pa.fecha_planilla DESC
+        LIMIT 1
+      `;
+      
+      const resultAlternativo = await this.dataSource.query(queryAlternativo, [matricula]);
+      
+      if (!resultAlternativo || resultAlternativo.length === 0) {
+        throw new BadRequestException(`No se encontró salario para el trabajador con matrícula ${matricula} en planillas aprobadas`);
+      }
+      
+      console.log(`Salario encontrado (búsqueda alternativa) para ${matricula}: ${resultAlternativo[0].salario} de fecha ${resultAlternativo[0].fecha_planilla}`);
+      return parseFloat(resultAlternativo[0].salario);
     }
 
+    console.log(`Salario encontrado para ${matricula}: ${result[0].salario} de fecha ${result[0].fecha_planilla}`);
     return parseFloat(result[0].salario);
   }
 

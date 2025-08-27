@@ -45,18 +45,18 @@ export class IncapacidadesReembolsoDetalle {
   @Column({ nullable: true })
   regional: string;
 
-  // DATOS DE LA BAJA MÉDICA (del servicio externo)
-  @Column({ nullable: true })
-  comprobante: number; // COMPROBANTE del servicio
+  // DATOS DE LA BAJA MÉDICA (del servicio externo) - COMENTADAS TEMPORALMENTE
+  // @Column({ nullable: true })
+  // comprobante: number; // COMPROBANTE del servicio
 
-  @Column({ nullable: true })
-  especialidad: string; // ESP_NOM del servicio
+  // @Column({ nullable: true })
+  // especialidad: string; // ESP_NOM del servicio
 
-  @Column({ nullable: true })
-  medico: string; // MEDI_NOM del servicio
+  // @Column({ nullable: true })
+  // medico: string; // MEDI_NOM del servicio
 
-  @Column({ nullable: true })
-  tipo_baja_original: string; // TIPO_BAJA del servicio ("ENFERMEDAD    ")
+  // @Column({ nullable: true })
+  // tipo_baja_original: string; // TIPO_BAJA del servicio
 
   // Tipo de incapacidad (referencia a tabla de tipos)
   @Column()
@@ -72,14 +72,14 @@ export class IncapacidadesReembolsoDetalle {
   @Column()
   dias_incapacidad_inicial: number; // DIAS_IMPEDIMENTO
 
-  @Column({ type: 'date', nullable: true })
-  fecha_incorporacion: Date; // FECHA_INCORPORACION
+  // @Column({ type: 'date', nullable: true })
+  // fecha_incorporacion: Date; // FECHA_INCORPORACION
 
-  @Column({ type: 'time', nullable: true })
-  hora_incorporacion: string; // HORA_INCORPORACION
+  // @Column({ type: 'time', nullable: true })
+  // hora_incorporacion: string; // HORA_INCORPORACION
 
-  @Column({ type: 'timestamp', nullable: true })
-  fecha_registro_baja: Date; // FECHA_REGISTRO del servicio
+  // @Column({ type: 'timestamp', nullable: true })
+  // fecha_registro_baja: Date; // FECHA_REGISTRO del servicio
 
   // Fechas de cotización (período a reembolsar en este mes)
   @Column({ type: 'date' })
