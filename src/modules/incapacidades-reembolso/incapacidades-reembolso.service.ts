@@ -187,81 +187,120 @@ export class IncapacidadesReembolsoService {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
-
+  
     try {
       // Verificar que la planilla existe y está en borrador
       const planilla = await this.incapacidadesRepo.findOne({
         where: { id_incapacidad_reembolso: createDto.id_incapacidad_reembolso },
       });
-
+  
       if (!planilla) {
         throw new NotFoundException('Planilla no encontrada');
       }
-
+  
       if (planilla.estado !== 0) {
         throw new BadRequestException('Solo se pueden agregar trabajadores a planillas en BORRADOR');
       }
 
+      let datosBajaMedica = null;
+  
       // Obtener configuración del tipo de incapacidad
       const tipoIncapacidad = await this.tiposService.findOne(createDto.id_tipo_incapacidad);
       if (!tipoIncapacidad) {
         throw new NotFoundException('Tipo de incapacidad no encontrado');
       }
 
-      // Buscar salario del trabajador en planillas de aportes (si no viene)
-      let salarioTotal = createDto.salario_total;
-      if (!salarioTotal) {
-        salarioTotal = await this.obtenerSalarioTrabajador(createDto.matricula, planilla.fecha_planilla);
+      if (createDto.matricula) {
+        try {
+          const respuestaBajas = await this.externalApiService.buscarBajasMedicas(createDto.matricula);
+          if (respuestaBajas.status && respuestaBajas.data && respuestaBajas.data.length > 0) {
+            // Buscar la baja que coincida con las fechas proporcionadas
+            datosBajaMedica = respuestaBajas.data.find(baja => {
+              const fechaBajaInicio = new Date(baja.DIA_DESDE).toISOString().split('T')[0];
+              const fechaDtoInicio = new Date(createDto.fecha_baja_medica_inicio).toISOString().split('T')[0];
+              return fechaBajaInicio === fechaDtoInicio;
+            });
+          }
+        } catch (error) {
+          console.warn('No se pudieron obtener datos del servicio externo:', error.message);
+        }
       }
-
+  
+  
+      // Obtener datos completos del trabajador desde planillas de aportes
+      const datosTrabajador = await this.obtenerDatosTrabajador(createDto.matricula, planilla.fecha_planilla);
+  
+      // Obtener número correlativo para el detalle
+      const countQuery = `
+        SELECT COUNT(*) + 1 as siguiente_nro 
+        FROM transversales.incapacidades_reembolso_detalles 
+        WHERE id_incapacidad_reembolso = $1
+      `;
+      const countResult = await this.dataSource.query(countQuery, [createDto.id_incapacidad_reembolso]);
+      const siguienteNro = parseInt(countResult[0].siguiente_nro);
+  
       // Validar cotizaciones previas
       const cotizacionesPrevias = await this.validarCotizacionesPrevias(
         createDto.matricula, 
         planilla.fecha_planilla,
         tipoIncapacidad.cotizaciones_minimas
       );
-
-      // Convertir fechas de string a Date si es necesario
-      const fechaBajaInicio = new Date(createDto.fecha_baja_medica_inicio);
-      const fechaBajaFin = new Date(createDto.fecha_baja_medica_fin);
-      const fechaCotizacionDel = new Date(createDto.fecha_cotizacion_del);
-      const fechaCotizacionAl = new Date(createDto.fecha_cotizacion_al);
-
+  
       // Calcular datos financieros
       const calculosFinancieros = this.calcularReembolso({
-        fechaBajaInicio: fechaBajaInicio,
-        fechaBajaFin: fechaBajaFin,
+        fechaBajaInicio: createDto.fecha_baja_medica_inicio,
+        fechaBajaFin: createDto.fecha_baja_medica_fin,
         diasIncapacidad: createDto.dias_incapacidad_inicial,
-        fechaCotizacionDel: fechaCotizacionDel,
-        fechaCotizacionAl: fechaCotizacionAl,
-        salarioTotal: salarioTotal,
+        fechaCotizacionDel: createDto.fecha_cotizacion_del,
+        fechaCotizacionAl: createDto.fecha_cotizacion_al,
+        salarioTotal: datosTrabajador.salario,
         porcentajeReembolso: tipoIncapacidad.porcentaje_reembolso,
         diasCarencia: tipoIncapacidad.dias_carencia,
       });
 
-      // Crear detalle
+      
+  
+      // Crear detalle con todos los campos poblados
       const detalle = this.detallesRepo.create({
         ...createDto,
-        salario_total: salarioTotal,
+        // Número correlativo
+        nro: siguienteNro,
+        
+        // Datos poblados desde planillas de aportes
+        sexo: datosTrabajador.sexo,
+        cargo: datosTrabajador.cargo,
+        regional: datosTrabajador.regional,
+        
+        // Datos del servicio externo (si vienen en el DTO)
+        comprobante: datosBajaMedica?.COMPROBANTE || createDto.comprobante || null,
+      especialidad: datosBajaMedica?.ESP_NOM || createDto.especialidad || null,
+      medico: datosBajaMedica?.MEDI_NOM || createDto.medico || null,
+        
+        // Cálculos financieros
+        salario_total: datosTrabajador.salario,
         salario_dia: calculosFinancieros.salarioDia,
         dias_mes: calculosFinancieros.diasMes,
         dias_cbes: calculosFinancieros.diasCbes,
         subtotal_salario: calculosFinancieros.subtotalSalario,
         porcentaje_reembolso: tipoIncapacidad.porcentaje_reembolso,
         monto_reembolso: calculosFinancieros.montoReembolso,
+        
+        // Validaciones
         cotizaciones_previas: cotizacionesPrevias.cantidad,
         cumple_requisitos: cotizacionesPrevias.cumple,
+        
+        // Auditoría
         usuario_registro: usuarioCreacion,
       });
-
+  
       const detalleSaved = await queryRunner.manager.save(detalle);
-
+  
       // Actualizar totales de la planilla
       await this.actualizarTotalesPlanilla(createDto.id_incapacidad_reembolso, queryRunner);
-
+  
       await queryRunner.commitTransaction();
       return ResponseUtil.success(detalleSaved, 'Trabajador agregado exitosamente');
-
+  
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -293,10 +332,16 @@ export class IncapacidadesReembolsoService {
       porcentajeReembolso, 
       diasCarencia 
     } = params;
-
+  
+    // CONVERTIR A DATE SI SON STRINGS
+    const fechaBajaInicioDate = new Date(fechaBajaInicio);
+    const fechaBajaFinDate = new Date(fechaBajaFin);
+    const fechaCotizacionDelDate = new Date(fechaCotizacionDel);
+    const fechaCotizacionAlDate = new Date(fechaCotizacionAl);
+  
     // Calcular intersección entre período de baja y período de planilla
-    const inicioReembolso = fechaCotizacionDel > fechaBajaInicio ? fechaCotizacionDel : fechaBajaInicio;
-    const finReembolso = fechaCotizacionAl < fechaBajaFin ? fechaCotizacionAl : fechaBajaFin;
+    const inicioReembolso = fechaCotizacionDelDate > fechaBajaInicioDate ? fechaCotizacionDelDate : fechaBajaInicioDate;
+    const finReembolso = fechaCotizacionAlDate < fechaBajaFinDate ? fechaCotizacionAlDate : fechaBajaFinDate;
     
     // Si no hay intersección, no hay días a reembolsar
     if (inicioReembolso > finReembolso) {
@@ -377,6 +422,38 @@ export class IncapacidadesReembolsoService {
     console.log(`Salario encontrado para ${matricula}: ${result[0].salario} de fecha ${result[0].fecha_planilla}`);
     return parseFloat(result[0].salario);
   }
+
+  private async obtenerDatosTrabajador(matricula: string, fechaPlanilla: Date) {
+    const query = `
+      SELECT 
+        pad.salario,
+        COALESCE(pad.sexo, 'M') as sexo,
+        COALESCE(pad.cargo, 'NO ESPECIFICADO') as cargo,
+        COALESCE(pad.regional, 'LA PAZ') as regional
+      FROM transversales.planilla_aportes_detalles pad
+      INNER JOIN transversales.planillas_aportes pa ON pad.id_planilla_aportes = pa.id_planilla_aportes
+      WHERE pad.matricula = $1 
+        AND pa.fecha_planilla <= $2
+        AND pa.estado = 2
+      ORDER BY pa.fecha_planilla DESC
+      LIMIT 1
+    `;
+  
+    const result = await this.dataSource.query(query, [matricula, fechaPlanilla]);
+    
+    if (!result || result.length === 0) {
+      throw new BadRequestException(`No se encontraron datos para el trabajador con matrícula ${matricula}`);
+    }
+  
+    return {
+      salario: parseFloat(result[0].salario),
+      sexo: result[0].sexo,
+      cargo: result[0].cargo,
+      regional: result[0].regional,
+    };
+  }
+
+
 
   private async validarCotizacionesPrevias(
     matricula: string, 

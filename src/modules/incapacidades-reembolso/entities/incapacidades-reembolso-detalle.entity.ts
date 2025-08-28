@@ -45,18 +45,16 @@ export class IncapacidadesReembolsoDetalle {
   @Column({ nullable: true })
   regional: string;
 
-  // DATOS DE LA BAJA MÉDICA (del servicio externo) - COMENTADAS TEMPORALMENTE
-  // @Column({ nullable: true })
-  // comprobante: number; // COMPROBANTE del servicio
+  // DATOS DE LA BAJA MÉDICA (del servicio externo) 
+  @Column({ nullable: true })
+  comprobante: number; // COMPROBANTE del servicio
 
-  // @Column({ nullable: true })
-  // especialidad: string; // ESP_NOM del servicio
+  @Column({ nullable: true })
+  especialidad: string; // ESP_NOM del servicio
 
-  // @Column({ nullable: true })
-  // medico: string; // MEDI_NOM del servicio
+  @Column({ nullable: true })
+  medico: string; // MEDI_NOM del servicio
 
-  // @Column({ nullable: true })
-  // tipo_baja_original: string; // TIPO_BAJA del servicio
 
   // Tipo de incapacidad (referencia a tabla de tipos)
   @Column()

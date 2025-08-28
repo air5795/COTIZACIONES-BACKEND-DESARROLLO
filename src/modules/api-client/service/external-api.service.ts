@@ -248,23 +248,19 @@ export class ExternalApiService {
 }
 
 async buscarBajasMedicas(matricula: string): Promise<any> {
-  console.log("Llamando a getCertificadoIncapacidadByParamMat con matricula:", matricula);
+  console.log("🔍 Llamando a getCertificadoIncapacidadByParamMat con matrícula:", matricula);
   
-  if (!this.apiToken) {
-    console.error('Token no disponible en getCertificadoIncapacidadByParamMat');
-    throw new Error('Token no disponible');
-  }
+  return await this.handleRequest(async () => {
+    const url = `${this.baseUrl}/gestion/getCertificadoIncapacidadByParamMat/${matricula}`;
 
-  const url = `${this.baseUrl}/gestion/getCertificadoIncapacidadByParamMat/${matricula}`;
-  console.log("URL de consulta:", url);
-
-  try {
     const response = await firstValueFrom(
       this.httpService.get(url, {
-        headers: { Authorization: `Bearer ${this.apiToken}` },
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
       }),
     );
-
+    
     if (response.data?.bajasDB?.length > 0) {
       return {
         ok: true,
@@ -276,14 +272,7 @@ async buscarBajasMedicas(matricula: string): Promise<any> {
         bajasDB: []
       };
     }
-  } catch (error) {
-    console.error('Error en buscarBajasMedicas:', error);
-    return {
-      ok: false,
-      bajasDB: [],
-      message: `Error al consultar bajas médicas: ${error.message}`
-    };
-  }
+  }, 'getCertificadoIncapacidadByParamMat');
 }
 
 

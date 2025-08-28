@@ -11,7 +11,7 @@ export class CreateIncapacidadDetalleDto {
     comprobante?: number;
     especialidad?: string;
     medico?: string;
-    tipo_baja_original?: string;
+    /* tipo_baja_original?: string; */
     
     id_tipo_incapacidad: number;
     fecha_baja_medica_inicio: Date;

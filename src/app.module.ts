@@ -21,6 +21,7 @@ import { EmpresasModule } from './modules/empresas/empresas.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 import { IncapacidadesReembolsoModule } from './modules/incapacidades-reembolso/incapacidades-reembolso.module';
 import { TiposIncapacidadModule } from './modules/tipos-incapacidad/tipos-incapacidad.module';
+import { ReembolsosIncapacidadesModule } from './modules/reembolsos-incapacidades/solicitudes_reembolso/solicitudes_reembolso.module';
 
 const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}?sslmode=disable`;
 
@@ -56,6 +57,7 @@ const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.e
     NotificacionesModule,
     TiposIncapacidadModule,
     IncapacidadesReembolsoModule,
+    ReembolsosIncapacidadesModule
 
   ],
   controllers: [],

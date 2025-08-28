@@ -444,7 +444,7 @@ async findAllWithDetails() {
     const pagos = await this.pagoAporteRepository
       .createQueryBuilder('pago')
       .leftJoinAndSelect('pago.planilla', 'planilla')
-      .leftJoinAndSelect('planilla.empresa.nombre', 'empresa') // Cargar la relación empresa
+      .leftJoinAndSelect('planilla.empresa', 'empresa') // ✅ Correcto
       .getMany();
 
     // Formatear los datos
@@ -464,7 +464,7 @@ async findAllWithDetails() {
         ? moment(pago.fecha_modificacion).format('DD/MM/YYYY HH:mm:ss')
         : 'N/A',
       observaciones: pago.observaciones || 'Sin observaciones',
-      empresa: pago.planilla?.empresa?.emp_nom || 'No disponible', // Mapear emp_nom como empresa
+      empresa: pago.planilla?.empresa?.emp_nom || 'No disponible', // ✅ Esto ya está correcto
       fecha_planilla: pago.planilla?.fecha_planilla
         ? moment(pago.planilla.fecha_planilla).format('DD/MM/YYYY')
         : 'No disponible',
