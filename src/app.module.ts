@@ -4,14 +4,10 @@ import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from './core/database/database.module';
 import config from './core/config/config';
 import { enviroments } from './core/config/enviroments';
-
 import { AuthModule } from './modules/auth/auth.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
-//import { APP_FILTER } from '@nestjs/core';
-
 import { LoggerModule } from './modules/logger/logger.module';
 import { ApiClientModule } from './modules/api-client/api-client.module';
-import { PlanillaEmpresaModule } from './modules/planilla-empresa/planilla-empresa.module';
 import { ParClasificadorDetalleModule } from './modules/parametro/par-clasificador-detalle.module';
 import { PlanillasAportesModule } from './modules/planillas_aportes/planillas_aportes.module';
 import { PlanillasAdicionalesModule } from './modules/planillas_adicionales/planillas_adicionales.module';
@@ -40,14 +36,13 @@ const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.e
       rootPath: process.env.ARCHIVOS,
       serveRoot: '/ruta',
       serveStaticOptions: {
-        index: false, // Esto desactiva la búsqueda del archivo 'index.html' predeterminado.
+        index: false, 
       },
     }),
     DatabaseModule,
     AuthModule,
     LoggerModule,
     ApiClientModule,
-    PlanillaEmpresaModule,
     ParClasificadorDetalleModule,
     PlanillasAportesModule,
     PlanillasAdicionalesModule,

@@ -15,10 +15,27 @@ import { Client } from 'pg';
           ssl: {
             rejectUnauthorized: false,
           },
-          //synchronize: true, //modificar para el autosincronize
           synchronize: false,
           autoLoadEntities: true,
-          //logging: true,
+          logging: false, // Cambiar a true solo para debug
+          
+          // 🚀 CONFIGURACIONES DE RENDIMIENTO DESDE VARIABLES DE ENTORNO
+          extra: {
+            max: configEnv.database.maxConnections,                    // Máximo conexiones simultáneas
+            min: configEnv.database.minConnections,                    // Mínimo conexiones en el pool
+            idleTimeoutMillis: configEnv.database.idleTimeout,         // Timeout para conexiones inactivas
+            connectionTimeoutMillis: configEnv.database.connectionTimeout, // Tiempo para establecer conexión
+            acquireTimeoutMillis: 60000,                               // 60 segundos para obtener conexión del pool
+            statement_timeout: configEnv.database.queryTimeout,        // Timeout para statements
+            query_timeout: configEnv.database.queryTimeout,            // Timeout para queries
+          },
+          
+          // ⏱️ TIMEOUTS ADICIONALES
+          maxQueryExecutionTime: configEnv.database.queryTimeout - 5000,  // 5 segundos menos que el query timeout
+          
+          // 📊 CONFIGURACIONES DE LOGGING PARA PRODUCCIÓN
+          logger: 'advanced-console',
+          logNotifications: true,
         };
       },
     }),
@@ -32,6 +49,9 @@ import { Client } from 'pg';
           ssl: {
             rejectUnauthorized: false,
           },
+          // 🚀 CONFIGURACIONES ADICIONALES PARA EL CLIENTE PG DESDE VARIABLES DE ENTORNO
+          connectionTimeoutMillis: configEnv.database.connectionTimeout,
+          query_timeout: configEnv.database.queryTimeout,
         });
         client.connect();
         return client;

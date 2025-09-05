@@ -6,13 +6,14 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
 } from '@nestjs/common';
 import { EmpresasService } from './empresas.service';
 import { CreateEmpresaDto } from './dto/create-empresa.dto';
 import { UpdateEmpresaDto } from './dto/update-empresa.dto';
 import { Empresa } from './entities/empresa.entity';
 import { ApiTags } from '@nestjs/swagger';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 @ApiTags('Empresas Afiliadas')
 @Controller('empresas')
 export class EmpresasController {
@@ -22,6 +23,48 @@ export class EmpresasController {
   async syncEmpresas() {
     await this.empresasService.syncEmpresas();
     return { message: 'Empresas sincronizadas exitosamente' };
+  }
+
+  @Get('paginated')
+  @ApiOperation({ 
+    summary: 'Obtener empresas paginadas con filtros de búsqueda',
+    description: 'Endpoint para obtener empresas con paginación y filtros de búsqueda que funcionan en todos los campos de la entidad'
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Número de página (por defecto: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Límite de elementos por página (por defecto: 10)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Término de búsqueda para filtrar en todos los campos' })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de empresas paginadas retornada exitosamente.',
+    schema: {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/Empresa' }
+        },
+        total: { type: 'number', description: 'Total de registros' },
+        page: { type: 'number', description: 'Página actual' },
+        limit: { type: 'number', description: 'Límite por página' },
+        totalPages: { type: 'number', description: 'Total de páginas' }
+      }
+    }
+  })
+  async findAllPaginated(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ): Promise<{
+    data: Empresa[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const pageNumber = page ? parseInt(page, 10) : 1;
+    const limitNumber = limit ? parseInt(limit, 10) : 10;
+    
+    return this.empresasService.findAllPaginated(pageNumber, limitNumber, search);
   }
 
   @Post()

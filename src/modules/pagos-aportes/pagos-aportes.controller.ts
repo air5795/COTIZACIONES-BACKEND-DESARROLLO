@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UploadedFile, UseInterceptors, BadRequestException, Get, Param, HttpException, HttpStatus, StreamableFile } from '@nestjs/common';
+import { Controller, Post, Body, UploadedFile, UseInterceptors, BadRequestException, Get, Param, HttpException, HttpStatus, StreamableFile, Patch } from '@nestjs/common';
 import { PagosAportesService } from './pagos-aportes.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
@@ -118,6 +118,35 @@ async obtenerDemasiaMesAnterior(@Param('id_planilla') id_planilla: number): Prom
   }
 }
 
-
+  // ACTUALIZAR OBSERVACIONES DE UN PAGO
+  @Patch('update-observaciones/:id')
+  @ApiOperation({ summary: 'Actualizar las observaciones de un pago específico' })
+  @ApiParam({ name: 'id', description: 'ID del pago a actualizar', type: Number })
+  @ApiBody({ 
+    schema: { 
+      type: 'object', 
+      properties: { 
+        observaciones: { type: 'string', description: 'Nuevas observaciones para el pago' },
+        usuario_modificacion: { type: 'string', description: 'Usuario que realiza la modificación (opcional)' }
+      },
+      required: ['observaciones']
+    } 
+  })
+  @ApiResponse({ status: 200, description: 'Observaciones actualizadas exitosamente' })
+  @ApiResponse({ status: 400, description: 'Error al actualizar las observaciones' })
+  async updateObservaciones(
+    @Param('id') id: number,
+    @Body() body: { observaciones: string; usuario_modificacion?: string }
+  ) {
+    try {
+      return await this.pagosAportesService.updateObservaciones(
+        id, 
+        body.observaciones, 
+        body.usuario_modificacion
+      );
+    } catch (error) {
+      throw new BadRequestException(`Error al actualizar las observaciones: ${error.message}`);
+    }
+  }
 
 }

@@ -166,4 +166,73 @@ export class EmpresasService {
   
 
   }
+
+  // Método para obtener empresas paginadas con filtros de búsqueda
+  async findAllPaginated(
+    page: number = 1,
+    limit: number = 10,
+    search?: string
+  ): Promise<{
+    data: Empresa[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const queryBuilder = this.empresaRepository.createQueryBuilder('empresa');
+
+    // Aplicar filtros de búsqueda si se proporciona el término de búsqueda
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      queryBuilder.where(
+        `(
+          CAST(empresa.emp_cod AS TEXT) ILIKE :search OR
+          empresa.emp_reg ILIKE :search OR
+          empresa.cod_patronal ILIKE :search OR
+          empresa.emp_nom ILIKE :search OR
+          empresa.emp_legal ILIKE :search OR
+          empresa.emp_activ ILIKE :search OR
+          CAST(empresa.emp_ntrab AS TEXT) ILIKE :search OR
+          empresa.emp_calle ILIKE :search OR
+          empresa.emp_num ILIKE :search OR
+          empresa.emp_telf ILIKE :search OR
+          empresa.emp_zona ILIKE :search OR
+          empresa.emp_localidad ILIKE :search OR
+          empresa.emp_lug ILIKE :search OR
+          empresa.emp_usu ILIKE :search OR
+          empresa.emp_estado ILIKE :search OR
+          empresa.emp_obs ILIKE :search OR
+          empresa.tipo ILIKE :search OR
+          empresa.emp_nom_corto ILIKE :search OR
+          CAST(empresa.emp_nit AS TEXT) ILIKE :search OR
+          empresa.emp_matricula ILIKE :search OR
+          empresa.usuario_registro ILIKE :search OR
+          empresa.usuario_modificacion ILIKE :search OR
+          empresa.emp_cod_entidad ILIKE :search
+        )`,
+        { search: searchTerm }
+      );
+    }
+
+    // Ordenar por id_empresa de forma descendente (más recientes primero)
+    queryBuilder.orderBy('empresa.id_empresa', 'DESC');
+
+    // Aplicar paginación
+    const offset = (page - 1) * limit;
+    queryBuilder.skip(offset).take(limit);
+
+    // Ejecutar la consulta
+    const [data, total] = await queryBuilder.getManyAndCount();
+
+    // Calcular total de páginas
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages,
+    };
+  }
 }

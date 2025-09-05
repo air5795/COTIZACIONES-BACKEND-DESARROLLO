@@ -52,6 +52,9 @@ export class PagoAporte {
   @Column({ nullable: true })
   observaciones: string;
 
+  @Column({ type: 'integer', generated: 'increment', unique: true, nullable: true })
+  numero_recibo: number;
+
   // Relación con la tabla planillas_aportes
   @ManyToOne(() => PlanillasAporte, (planilla) => planilla.id_planilla_aportes, {
     onDelete: 'RESTRICT',

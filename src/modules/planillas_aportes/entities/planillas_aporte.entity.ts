@@ -1,9 +1,16 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { PlanillaAportesDetalles } from './planillas_aportes_detalles.entity';
 import { PagoAporte } from 'src/modules/pagos-aportes/entities/pagos-aporte.entity';
 import { Empresa } from 'src/modules/empresas/entities/empresa.entity';
 
+// 🚀 ÍNDICES AGREGADOS PARA RENDIMIENTO
 @Entity({ schema: 'transversales', name: 'planillas_aportes' })
+@Index('IDX_planilla_cod_patronal', ['cod_patronal'])
+@Index('IDX_planilla_fecha_tipo', ['cod_patronal', 'fecha_planilla', 'tipo_planilla'])
+@Index('IDX_planilla_estado', ['estado'])
+@Index('IDX_planilla_mes_gestion', ['mes', 'gestion'])
+@Index('IDX_planilla_fecha_planilla', ['fecha_planilla'])
+@Index('IDX_planilla_origen', ['id_planilla_origen'])
 export class PlanillasAporte {
   @PrimaryGeneratedColumn()
   id_planilla_aportes: number;

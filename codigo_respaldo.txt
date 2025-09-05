@@ -1,0 +1,436 @@
+// 2 .- GUARDAR PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
+async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) {
+  const { cod_patronal, gestion, mes, tipo_planilla, usuario_creacion, nombre_creacion } = createPlanillaDto;
+
+  const empresa = await this.empresasService.findByCodPatronal(cod_patronal);
+  if (!empresa) {
+    throw new BadRequestException('No se encontró una empresa con el código patronal proporcionado');
+  }
+
+  const tipoEmpresa = empresa.tipo?.toUpperCase();
+  if (!tipoEmpresa) {
+    throw new BadRequestException('No se pudo determinar el tipo de empresa');
+  }
+  if (!['PA', 'AP', 'AV', 'VA'].includes(tipoEmpresa)) {
+    throw new BadRequestException(`Tipo de empresa no válido: ${tipoEmpresa}`);
+  }
+
+  const fechaPlanilla = new Date(`${gestion}-${mes.padStart(2, '0')}-01`);
+
+  let planillaMensualExistente: PlanillasAporte | null = null;
+
+  if (tipo_planilla === 'Planilla Adicional') {
+    // Solo aceptamos adicionales si hay una mensual activa (estado = 1)
+    planillaMensualExistente = await this.planillaRepo.findOne({
+      where: {
+        cod_patronal,
+        fecha_planilla: fechaPlanilla,
+        tipo_planilla: 'Mensual',
+        estado: 1,
+      },
+    });
+
+    if (!planillaMensualExistente) {
+      throw new BadRequestException('Debe existir una planilla Mensual activa (estado = 1) antes de subir una Adicional.');
+    }
+  } else if (tipo_planilla === 'Mensual') {
+    // Validación para no duplicar planilla mensual (sin importar estado)
+    planillaMensualExistente = await this.planillaRepo.findOne({
+      where: {
+        cod_patronal,
+        fecha_planilla: fechaPlanilla,
+        tipo_planilla: 'Mensual',
+      },
+    });
+
+    if (planillaMensualExistente) {
+      throw new BadRequestException('Ya existe una planilla Mensual para este mes y gestión.');
+    }
+  }
+
+  const parseOrZero = (val: any): number => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === 'string') {
+      const clean = val.replace(/\./g, '').replace(',', '.').trim();
+      const parsed = parseFloat(clean);
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    if (typeof val === 'number') return val;
+    return 0;
+  };
+
+  let totalImporte = 0;
+  data.forEach((row, index) => {
+    const haberBasico = parseOrZero(row['Haber Básico']);
+    const bonoAntiguedad = parseOrZero(row['Bono de antigüedad']);
+    const montoHorasExtra = parseOrZero(row['Monto horas extra']);
+    const montoHorasExtraNocturnas = parseOrZero(row['Monto horas extra nocturnas']);
+    const otrosBonosPagos = parseOrZero(row['Otros bonos y pagos']);
+
+    const sumaFila = haberBasico + bonoAntiguedad + montoHorasExtra + montoHorasExtraNocturnas + otrosBonosPagos;
+
+    if (isNaN(sumaFila)) {
+      throw new BadRequestException(`Error al calcular total en la fila ${index + 1}: valores no numéricos`);
+    }
+
+    totalImporte += sumaFila;
+  });
+
+  let cotizacionTasa: number;
+  if (tipoEmpresa === 'PA') {
+    cotizacionTasa = parseFloat((totalImporte * 0.03).toFixed(6));
+  } else {
+    cotizacionTasa = parseFloat((totalImporte * 0.1).toFixed(6));
+  }
+
+  const trabajadoresUnicos = new Set(data.map(row => row['Número documento de identidad'])).size;
+  const totalTrabaj = trabajadoresUnicos;
+
+  console.log(`📊 Estadísticas de guardado:
+  - Registros totales: ${data.length}
+  - Trabajadores únicos: ${totalTrabaj}
+  - Trabajadores con múltiples cargos: ${data.length - totalTrabaj}`);
+
+  const nuevaPlanilla = this.planillaRepo.create({
+    cod_patronal,
+    id_empresa: empresa.id_empresa,
+    fecha_planilla: fechaPlanilla,
+    tipo_planilla,
+    total_importe: totalImporte,
+    total_trabaj: totalTrabaj,
+    estado: 0,
+    fecha_declarada: null,
+    mes,
+    gestion,
+    usuario_creacion,
+    nombre_creacion,
+    cotizacion_tasa: cotizacionTasa,
+    id_planilla_origen: tipo_planilla === 'Planilla Adicional' ? planillaMensualExistente.id_planilla_aportes : null,
+  });
+
+  const planillaGuardada = await this.planillaRepo.save(nuevaPlanilla);
+
+  function parseExcelDate(value: any): string | undefined {
+    // Si el valor es null, undefined o está vacío, retornar undefined
+    if (!value) return undefined;
+    
+    // Si es un string, limpiar espacios en blanco
+    if (typeof value === 'string') {
+      const cleanValue = value.trim();
+      // Si después de limpiar está vacío, retornar undefined (no es error)
+      if (cleanValue === '') return undefined;
+      
+      // Intentar parsear la fecha limpia
+      const parsedDate = moment(cleanValue, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY', 'DD-MM-YYYY'], true);
+      if (parsedDate.isValid()) {
+        return parsedDate.toISOString();
+      }
+      
+      // Si no es válida, lanzar error con el valor limpio
+      throw new BadRequestException(`Formato de fecha no válido: "${cleanValue}"`);
+    }
+
+    // Si es un número (fecha serial de Excel)
+    if (typeof value === 'number' && !isNaN(value) && value > 0) {
+      const date = new Date(1900, 0, value - 1);
+      return isNaN(date.getTime()) ? undefined : date.toISOString();
+    }
+
+    return undefined;
+  }
+
+  let nroBase = 1;
+
+  if (tipo_planilla === 'Planilla Adicional') {
+    // Buscar el máximo número en TODAS las planillas relacionadas
+    const planillasRelacionadas = await this.planillaRepo.find({
+      where: [
+        { id_planilla_aportes: planillaMensualExistente.id_planilla_aportes },
+        { id_planilla_origen: planillaMensualExistente.id_planilla_aportes }
+      ]
+    });
+
+    const idsToCheck = planillasRelacionadas.map(p => p.id_planilla_aportes);
+
+    const maxNro = await this.detalleRepo
+      .createQueryBuilder('detalle')
+      .select('MAX(detalle.nro)', 'max')
+      .where('detalle.id_planilla_aportes IN (:...ids)', { ids: idsToCheck })
+      .getRawOne();
+
+    nroBase = (parseInt(maxNro?.max || '0', 10) || 0) + 1;
+  }
+
+  const detalles: CreatePlanillaAportesDetallesDto[] = data.map((row, index) => {
+    const redondear = (valor: any): number => parseFloat(parseOrZero(valor).toFixed(6));
+    const haberBasico = redondear(row['Haber Básico']);
+    const bonoAntiguedad = redondear(row['Bono de antigüedad']);
+    const montoHorasExtra = redondear(row['Monto horas extra']);
+    const montoHorasExtraNocturnas = redondear(row['Monto horas extra nocturnas']);
+    const otrosBonosPagos = redondear(row['Otros bonos y pagos']);
+
+    return {
+      id_planilla_aportes: planillaGuardada.id_planilla_aportes,
+      nro: tipo_planilla === 'Mensual' ? index + 1 : nroBase + index,
+      ci: row['Número documento de identidad']?.toString(),
+      apellido_paterno: row['Apellido Paterno']?.toString(),
+      apellido_materno: row['Apellido Materno']?.toString(),
+      nombres: row['Nombres']?.toString(),
+      sexo: row['Sexo (M/F)']?.toString(),
+      cargo: row['Cargo']?.toString(),
+      fecha_nac: parseExcelDate(row['Fecha de nacimiento']),
+      fecha_ingreso: parseExcelDate(row['Fecha de ingreso']),
+      fecha_retiro: parseExcelDate(row['Fecha de retiro']),
+      dias_pagados: parseInt(row['Días pagados'] || '0', 10) || null,
+      haber_basico: haberBasico,
+      bono_antiguedad: bonoAntiguedad,
+      monto_horas_extra: montoHorasExtra,
+      monto_horas_extra_nocturnas: montoHorasExtraNocturnas,
+      otros_bonos_pagos: otrosBonosPagos,
+      salario: parseFloat((haberBasico + bonoAntiguedad + montoHorasExtra + montoHorasExtraNocturnas + otrosBonosPagos).toFixed(6)),
+      regional: row['regional']?.toString(),
+      tipo: tipo_planilla.toLowerCase().replace(' ', '_') as 'mensual' | 'planilla_adicional',
+    };
+  });
+
+  const batchSize = 1000;
+  for (let i = 0; i < detalles.length; i += batchSize) {
+    const batch = detalles.slice(i, i + batchSize);
+    await this.detalleRepo.save(batch, { chunk: 1000 });
+  }
+
+  // NUEVO: Si es una planilla adicional, actualizar los totales de la planilla mensual
+  /* if (tipo_planilla === 'Planilla Adicional' && planillaMensualExistente) {
+    await this.actualizarTotalesPlanillaMensual(planillaMensualExistente.id_planilla_aportes, tipoEmpresa);
+  } */
+
+  return {
+    mensaje: '✅ Planilla guardada con éxito',
+    id_planilla: planillaGuardada.id_planilla_aportes,
+  };
+}
+
+
+// 3 .- ACTUALIZAR DETALLES DE PLANILLA DE APORTES -------------------------------------------------------------------------------------------------------
+async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanillaDto?: CreatePlanillasAporteDto) {
+  const planilla = await this.planillaRepo.findOne({
+    where: { id_planilla_aportes: id_planilla },
+    relations: ['empresa'],
+  });
+
+  if (!planilla) {
+    throw new NotFoundException('❌ La planilla no existe.');
+  }
+
+  if (planilla.estado !== 0) {
+    throw new BadRequestException('❌ Solo se pueden actualizar planillas en estado borrador.');
+  }
+
+  const datosValidos = data.filter(row =>
+    row['Número documento de identidad'] &&
+    row['Nombres'] &&
+    row['Haber Básico']
+  );
+
+  if (datosValidos.length === 0) {
+    throw new BadRequestException('❌ No se encontraron registros válidos en el archivo.');
+  }
+
+  let planillaMensualExistente: PlanillasAporte | null = null;
+  
+  if (planilla.tipo_planilla === 'Planilla Adicional') {
+    if (planilla.id_planilla_origen) {
+      planillaMensualExistente = await this.planillaRepo.findOne({
+        where: { id_planilla_aportes: planilla.id_planilla_origen }
+      });
+    } else {
+      const fechaPlanilla = new Date(`${planilla.gestion}-${planilla.mes.padStart(2, '0')}-01`);
+      planillaMensualExistente = await this.planillaRepo.findOne({
+        where: {
+          cod_patronal: planilla.cod_patronal,
+          fecha_planilla: fechaPlanilla,
+          tipo_planilla: 'Mensual',
+          estado: 1,
+        },
+      });
+    }
+
+    if (!planillaMensualExistente) {
+      throw new BadRequestException('No se encontró la planilla mensual correspondiente.');
+    }
+  }
+
+  if (createPlanillaDto) {
+    const { cod_patronal, gestion, mes, tipo_planilla } = createPlanillaDto;
+
+    const empresa = await this.empresasService.findByCodPatronal(cod_patronal);
+    if (!empresa) {
+      throw new BadRequestException('No se encontró una empresa con el código patronal proporcionado');
+    }
+
+    if (tipo_planilla === 'Planilla Adicional') {
+      planillaMensualExistente = await this.planillaRepo.findOne({
+        where: {
+          cod_patronal,
+          tipo_planilla: 'Mensual',
+          estado: 1,
+        },
+      });
+
+      if (!planillaMensualExistente) {
+        throw new BadRequestException('Debe existir una planilla Mensual activa (estado = 1) antes de subir una Adicional.');
+      }
+    } else if (tipo_planilla === 'Mensual') {
+      planillaMensualExistente = await this.planillaRepo.findOne({
+        where: {
+          cod_patronal,
+          tipo_planilla: 'Mensual',
+        },
+      });
+
+      if (planillaMensualExistente && planillaMensualExistente.id_planilla_aportes !== id_planilla) {
+        throw new BadRequestException('Ya existe una planilla Mensual para este mes y gestión.');
+      }
+    }
+  }
+
+    function parseExcelDate(value: any): string | undefined {
+      // Si el valor es null, undefined o está vacío, retornar undefined
+      if (!value) return undefined;
+      
+      // Si es un string, limpiar espacios en blanco
+      if (typeof value === 'string') {
+        const cleanValue = value.trim();
+        // Si después de limpiar está vacío, retornar undefined (no es error)
+        if (cleanValue === '') return undefined;
+        
+        // Intentar parsear la fecha limpia
+        const parsedDate = moment(cleanValue, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY', 'DD-MM-YYYY'], true);
+        if (parsedDate.isValid()) {
+          return parsedDate.toISOString();
+        }
+        
+        // Si no es válida, lanzar error con el valor limpio
+        throw new BadRequestException(`Formato de fecha no válido: "${cleanValue}"`);
+      }
+
+      // Si es un número (fecha serial de Excel)
+      if (typeof value === 'number' && !isNaN(value) && value > 0) {
+        const date = new Date(1900, 0, value - 1);
+        return isNaN(date.getTime()) ? undefined : date.toISOString();
+      }
+
+      return undefined;
+    }
+
+
+  let nroBase = 1;
+  const tipoPlanilla = createPlanillaDto?.tipo_planilla || planilla.tipo_planilla;
+  
+  if (tipoPlanilla === 'Planilla Adicional' && planillaMensualExistente) {
+    const planillasRelacionadas = await this.planillaRepo.find({
+      where: [
+        { id_planilla_aportes: planillaMensualExistente.id_planilla_aportes },
+        { id_planilla_origen: planillaMensualExistente.id_planilla_aportes }
+      ]
+    });
+
+    const idsToCheck = planillasRelacionadas
+      .filter(p => p.id_planilla_aportes !== id_planilla)
+      .map(p => p.id_planilla_aportes);
+
+    if (idsToCheck.length > 0) {
+      const maxNro = await this.detalleRepo
+        .createQueryBuilder('detalle')
+        .select('MAX(detalle.nro)', 'max')
+        .where('detalle.id_planilla_aportes IN (:...ids)', { ids: idsToCheck })
+        .getRawOne();
+
+      nroBase = (parseInt(maxNro?.max || '0', 10) || 0) + 1;
+    }
+  }
+
+  let totalImporte = 0;
+
+  // Contar trabajadores únicos por CI
+  const trabajadoresUnicos = new Set(datosValidos.map(row => row['Número documento de identidad'])).size;
+  const totalTrabaj = trabajadoresUnicos;
+
+  console.log(`📊 Estadísticas de actualización:
+  - Registros válidos: ${datosValidos.length}
+  - Trabajadores únicos: ${totalTrabaj}
+  - Trabajadores con múltiples cargos: ${datosValidos.length - totalTrabaj}`);
+
+  const nuevosDetalles: CreatePlanillaAportesDetallesDto[] = datosValidos.map((row, index) => {
+    try {
+      const haber_basico = parseFloat(row['Haber Básico'] || '0');
+      const bono_antiguedad = parseFloat(row['Bono de antigüedad'] || '0');
+      const horas_extra = parseFloat(row['Monto horas extra'] || '0');
+      const horas_extra_nocturnas = parseFloat(row['Monto horas extra nocturnas'] || '0');
+      const otros_bonos = parseFloat(row['Otros bonos y pagos'] || '0');
+
+      const salario = haber_basico + bono_antiguedad + horas_extra + horas_extra_nocturnas + otros_bonos;
+
+      totalImporte += salario;
+
+      return {
+        id_planilla_aportes: id_planilla,
+        nro: tipoPlanilla === 'Mensual' ? index + 1 : nroBase + index,
+        ci: row['Número documento de identidad'] || '',
+        apellido_paterno: row['Apellido Paterno'] || '',
+        apellido_materno: row['Apellido Materno'] || '',
+        nombres: row['Nombres'] || '',
+        sexo: row['Sexo (M/F)'] || '',
+        cargo: row['Cargo'] || '',
+        fecha_nac: parseExcelDate(row['Fecha de nacimiento']),
+        fecha_ingreso: parseExcelDate(row['Fecha de ingreso']),
+        fecha_retiro: parseExcelDate(row['Fecha de retiro']),
+        dias_pagados: row['Días pagados'] || 0,
+        haber_basico,
+        bono_antiguedad,
+        monto_horas_extra: horas_extra,
+        monto_horas_extra_nocturnas: horas_extra_nocturnas,
+        otros_bonos_pagos: otros_bonos,
+        salario,
+        regional: row['regional'] || '',
+        tipo: planilla.tipo_planilla.toLowerCase().replace(' ', '_') as 'mensual' | 'planilla_adicional',
+      };
+    } catch (error) {
+      throw new BadRequestException(`Error en la fila ${row['Nro.'] || index + 1}: ${error.message}`);
+    }
+  });
+
+  await this.detalleRepo.delete({ id_planilla_aportes: id_planilla });
+
+  const batchSize = 1000;
+  const totalnuevosDetalles = nuevosDetalles.length;
+  console.log(`Total de registros a guardar: ${totalnuevosDetalles}`);
+
+  for (let i = 0; i < totalnuevosDetalles; i += batchSize) {
+    const batch = nuevosDetalles.slice(i, i + batchSize);
+    console.log(`Guardando lote ${i / batchSize + 1} (${batch.length} registros)`);
+    try {
+      await this.detalleRepo.save(batch, { chunk: 1000 });
+    } catch (error) {
+      console.error(`Error al guardar lote ${i / batchSize + 1}:`, error);
+      throw new BadRequestException(`Error al guardar lote ${i / batchSize + 1}: ${error.message}`);
+    }
+  }
+
+  // Actualizar la planilla actual
+  planilla.total_importe = parseFloat(totalImporte.toFixed(6));
+  planilla.total_trabaj = totalTrabaj;
+  await this.planillaRepo.save(planilla);
+
+  // NUEVO: Si es una planilla adicional, actualizar también la planilla mensual
+  if (tipoPlanilla === 'Planilla Adicional' && planillaMensualExistente) {
+    await this.actualizarTotalesPlanillaMensual(planillaMensualExistente.id_planilla_aportes, planilla.empresa.tipo?.toUpperCase());
+  }
+
+  return {
+    mensaje: '✅ Detalles de la planilla actualizados con éxito',
+    id_planilla: planilla.id_planilla_aportes,
+    total_importe: planilla.total_importe,
+    total_trabajadores: totalTrabaj,
+  };
+}

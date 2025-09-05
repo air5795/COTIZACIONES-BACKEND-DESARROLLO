@@ -10,7 +10,7 @@ export class ExternalApiService {
   private userName = process.env.API_USERNAME;
   private password = process.env.API_PASSWORD;
   private apiToken: string | null = null;
-  private loginPromise: Promise<any> | null = null; // Para evitar múltiples logins simultáneos
+  private loginPromise: Promise<any> | null = null;
 
   constructor(private readonly httpService: HttpService) {
     console.log('EXTERNAL_API_URL:', this.baseUrl);
@@ -19,7 +19,6 @@ export class ExternalApiService {
   }
 
   async loginToExternalApi() {
-    // Evitar múltiples logins simultáneos
     if (this.loginPromise) {
       return await this.loginPromise;
     }

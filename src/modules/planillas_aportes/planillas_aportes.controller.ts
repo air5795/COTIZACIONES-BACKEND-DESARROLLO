@@ -56,6 +56,10 @@ export class PlanillasAportesController {
         }
         cb(null, true);
       },
+      // 🚀 LÍMITE DE TAMAÑO DE ARCHIVO AGREGADO
+      limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB máximo
+      },
     }),
   )
 
@@ -63,6 +67,7 @@ export class PlanillasAportesController {
   @ApiOperation({ summary: 'Subir un archivo Excel con la planilla de aportes' })
   @ApiResponse({ status: 201, description: 'Planilla guardada con éxito' })
   @ApiResponse({ status: 400, description: 'Error al procesar el archivo o datos inválidos' })
+  @ApiResponse({ status: 408, description: 'Timeout - El procesamiento está tomando más tiempo del esperado' })
   @ApiBody({ type: CreatePlanillasAporteDto })
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
@@ -70,37 +75,227 @@ export class PlanillasAportesController {
   ) {
     if (!file) throw new BadRequestException('No se recibió ningún archivo');
 
-    const data = this.planillasAportesService.procesarExcel(file.path);
-    return this.planillasAportesService.guardarPlanilla(
-      data,
-      createPlanillaDto,
-    );
+    console.log(`📁 Procesando archivo: ${file.originalname} (${file.size} bytes)`);
+    
+    try {
+      const inicioTiempo = Date.now();
+      
+      const data = this.planillasAportesService.procesarExcel(file.path);
+      
+      console.log(`📊 Archivo procesado: ${data.length} registros encontrados`);
+      
+      // 🚀 VALIDACIÓN DE TAMAÑO DE DATOS
+      if (data.length > 30000) {
+        throw new BadRequestException(`El archivo contiene ${data.length} registros. El máximo permitido es 30,000.`);
+      }
+      
+      if (data.length === 0) {
+        throw new BadRequestException('El archivo no contiene registros válidos.');
+      }
+      
+      const resultado = await this.planillasAportesService.guardarPlanilla(
+        data,
+        createPlanillaDto,
+      );
+      
+      const tiempoTotal = Date.now() - inicioTiempo;
+      const tiempoEnMinutos = (tiempoTotal / 60000).toFixed(1);
+      
+      console.log(`✅ Planilla guardada exitosamente en ${tiempoEnMinutos} minutos`);
+      
+      return {
+        ...resultado,
+        tiempoEjecucion: `${tiempoEnMinutos} minutos`,
+        timestamp: new Date().toISOString(),
+      };
+      
+    } catch (error) {
+      console.error(`❌ Error al procesar archivo ${file.originalname}:`, error.message);
+      
+      // 🧹 LIMPIAR ARCHIVO EN CASO DE ERROR
+      try {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+          console.log(`🗑️ Archivo temporal eliminado: ${file.path}`);
+        }
+      } catch (cleanupError) {
+        console.error('Error al limpiar archivo:', cleanupError.message);
+      }
+      
+      throw error;
+    } finally {
+      // 🧹 LIMPIAR ARCHIVO DESPUÉS DEL PROCESAMIENTO EXITOSO
+      try {
+        if (file && file.path && fs.existsSync(file.path)) {
+          // Esperar un poco antes de eliminar para asegurar que no esté en uso
+          setTimeout(() => {
+            try {
+              fs.unlinkSync(file.path);
+              console.log(`🗑️ Archivo temporal limpiado: ${file.path}`);
+            } catch (err) {
+              console.warn('No se pudo eliminar archivo temporal:', err.message);
+            }
+          }, 1000);
+        }
+      } catch (cleanupError) {
+        console.warn('Error en limpieza final:', cleanupError.message);
+      }
+    }
   }
 
   // 3.- Endpoint para actualizar los detalles de una planilla de aportes-----------------------------------------------------
 
   @Put('detalles/:id_planilla')
-  @ApiOperation({ summary: 'Actualizar los detalles de una planilla de aportes' })
-  @ApiResponse({ status: 200, description: 'Detalles actualizados con éxito' })
+  @ApiOperation({ 
+    summary: 'Actualizar los detalles de una planilla de aportes',
+    description: 'Reemplaza todos los detalles existentes de una planilla con nuevos datos. Soporta hasta 30,000 registros con procesamiento optimizado en lotes.'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Detalles actualizados con éxito',
+    schema: {
+      type: 'object',
+      properties: {
+        mensaje: { type: 'string', example: '✅ Detalles de la planilla actualizados con éxito' },
+        id_planilla: { type: 'number', example: 123 },
+        total_importe: { type: 'number', example: 150000.50 },
+        total_trabajadores: { type: 'number', example: 250 },
+        estadisticas: {
+          type: 'object',
+          properties: {
+            registros_procesados: { type: 'number', example: 250 },
+            trabajadores_unicos: { type: 'number', example: 250 },
+            lotes_procesados: { type: 'number', example: 1 },
+            total_importe: { type: 'number', example: 150000.50 }
+          }
+        },
+        tiempoEjecucion: { type: 'string', example: '2.3 minutos' }
+      }
+    }
+  })
   @ApiResponse({ status: 400, description: 'Error al actualizar los detalles' })
-  @ApiBody({ type: CreatePlanillasAporteDto, required: false })
+  @ApiResponse({ status: 404, description: 'La planilla no existe' })
+  @ApiResponse({ status: 408, description: 'Timeout - La actualización está tomando más tiempo del esperado' })
+  @ApiBody({ 
+    description: 'Datos de trabajadores y configuración opcional de planilla',
+    schema: {
+      type: 'object',
+      properties: {
+        trabajadores: {
+          type: 'array',
+          description: 'Array de trabajadores con sus datos',
+          minItems: 1,
+          maxItems: 30000,
+          items: {
+            type: 'object',
+            properties: {
+              'Número documento de identidad': { type: 'string', example: '12345678' },
+              'Apellido Paterno': { type: 'string', example: 'PÉREZ' },
+              'Apellido Materno': { type: 'string', example: 'LÓPEZ' },
+              'Nombres': { type: 'string', example: 'JUAN CARLOS' },
+              'Sexo (M/F)': { type: 'string', example: 'M' },
+              'Cargo': { type: 'string', example: 'TÉCNICO' },
+              'Fecha de nacimiento': { type: 'string', example: '01/01/1980' },
+              'Fecha de ingreso': { type: 'string', example: '01/01/2020' },
+              'Días pagados': { type: 'number', example: 30 },
+              'Haber Básico': { type: 'number', example: 3000 },
+              'Bono de antigüedad': { type: 'number', example: 500 },
+              'Monto horas extra': { type: 'number', example: 200 },
+              'Monto horas extra nocturnas': { type: 'number', example: 100 },
+              'Otros bonos y pagos': { type: 'number', example: 150 },
+              'regional': { type: 'string', example: 'LA PAZ' }
+            },
+            required: ['Número documento de identidad', 'Nombres', 'Haber Básico']
+          }
+        },
+        planilla: {
+          type: 'object',
+          description: 'Configuración opcional de la planilla (solo si se necesita actualizar metadatos)',
+          allOf: [{ $ref: '#/components/schemas/CreatePlanillasAporteDto' }]
+        }
+      },
+      required: ['trabajadores']
+    }
+  })
   async actualizarDetallesPlanilla(
     @Param('id_planilla', ParseIntPipe) id_planilla: number,
     @Body() body: { trabajadores: any[]; planilla?: CreatePlanillasAporteDto },
   ) {
+    // ✅ VALIDACIONES INICIALES
+    if (!body.trabajadores || !Array.isArray(body.trabajadores)) {
+      throw new BadRequestException('El campo "trabajadores" es requerido y debe ser un array');
+    }
+
+    if (body.trabajadores.length === 0) {
+      throw new BadRequestException('El array de trabajadores no puede estar vacío');
+    }
+
+    if (body.trabajadores.length > 30000) {
+      throw new BadRequestException(`Se enviaron ${body.trabajadores.length} registros. El máximo permitido es 30,000.`);
+    }
+
+    console.log(`🔄 Iniciando actualización de detalles para planilla ${id_planilla}:`);
+    console.log(`   📊 Registros recibidos: ${body.trabajadores.length}`);
+    console.log(`   ⚙️ Configuración adicional: ${body.planilla ? 'Sí' : 'No'}`);
+
     try {
-      return await this.planillasAportesService.actualizarDetallesPlanilla(
+      const inicioTiempo = Date.now();
+      
+      const resultado = await this.planillasAportesService.actualizarDetallesPlanilla(
         id_planilla,
         body.trabajadores,
         body.planilla,
       );
+      
+      const tiempoTotal = Date.now() - inicioTiempo;
+      const tiempoEnMinutos = (tiempoTotal / 60000).toFixed(1);
+      
+      console.log(`✅ Actualización completada exitosamente en ${tiempoEnMinutos} minutos`);
+      console.log(`   📈 Registros procesados: ${resultado.estadisticas?.registros_procesados || 0}`);
+      console.log(`   👥 Trabajadores únicos: ${resultado.estadisticas?.trabajadores_unicos || 0}`);
+      console.log(`   💰 Total importe: ${resultado.total_importe || 0}`);
+
+      return {
+        ...resultado,
+        tiempoEjecucion: `${tiempoEnMinutos} minutos`,
+        timestamp: new Date().toISOString(),
+      };
+      
     } catch (error) {
+      console.error(`❌ Error al actualizar detalles de planilla ${id_planilla}:`, error.message);
+      
+      // 🔍 CATEGORIZAR ERRORES PARA MEJOR RESPUESTA
+      if (error instanceof NotFoundException) {
+        throw new HttpException(
+          {
+            status: HttpStatus.NOT_FOUND,
+            error: error.message,
+            codigo: 'PLANILLA_NO_ENCONTRADA'
+          },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      
+      if (error instanceof BadRequestException) {
+        throw new HttpException(
+          {
+            status: HttpStatus.BAD_REQUEST,
+            error: error.message,
+            codigo: 'DATOS_INVALIDOS'
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      
+      // Error genérico del servidor
       throw new HttpException(
         {
-          status: HttpStatus.BAD_REQUEST,
-          error: error.message,
+          status: HttpStatus.INTERNAL_SERVER_ERROR,
+          error: 'Error interno al actualizar los detalles de la planilla',
+          detalle: error.message,
+          codigo: 'ERROR_INTERNO'
         },
-        HttpStatus.BAD_REQUEST,
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
