@@ -7,6 +7,7 @@ import { CreateSolicitudesReembolsoDto } from './dto/create-solicitudes_reembols
 import { UpdateSolicitudesReembolsoDto } from './dto/update-solicitudes_reembolso.dto';
 import { EmpresasService } from '../../empresas/empresas.service';
 import { ExternalApiService } from '../../api-client/service/external-api.service';
+import { PlanillasAportesService } from '../../planillas_aportes/planillas_aportes.service';
 
 @Injectable()
 export class ReembolsosIncapacidadesService {
@@ -17,6 +18,7 @@ export class ReembolsosIncapacidadesService {
     @InjectRepository(DetallesReembolso)
     private readonly detalleRepo: Repository<DetallesReembolso>,
     private readonly externalApiService: ExternalApiService,
+    private readonly planillasService: PlanillasAportesService,
   ) {}
 
   //1.- CREAR SOLICITUD MENSUAL DE REEMBOLSO ----------------------------------------------------------------------------------------
@@ -315,17 +317,207 @@ export class ReembolsosIncapacidadesService {
     }
   }
 
+// TODO : CALCULO DE BAJAS 
 
+//8.- CALCULAR REEMBOLSO CON DATOS REALES ----------------------------------------------------------------------------------------
+/* async calcularReembolsoConDatosReales(calcularDto: any) {
+  try {
+    const { matricula, cod_patronal, mes, gestion, baja_medica } = calcularDto;
 
+    // 1. Buscar datos del trabajador en planillas de aportes usando el método correcto
+    const detallesTrabajador = await this.planillasService.obtenerDetallesDeMes(
+      cod_patronal, mes, gestion
+    );
 
+    // 2. Buscar el trabajador específico por matrícula
+    const trabajador = detallesTrabajador.find(
+      (detalle: any) => detalle.matricula === matricula
+    );
 
+    if (!trabajador) {
+      throw new NotFoundException(
+        `No se encontró el trabajador con matrícula ${matricula} en la planilla de ${mes}/${gestion}`
+      );
+    }
 
+    // 3. Extraer datos reales del trabajador
+    const datosReales = {
+      ci: trabajador.ci,
+      apellido_paterno: trabajador.apellido_paterno,
+      apellido_materno: trabajador.apellido_materno,
+      nombres: trabajador.nombres,
+      salario_total: Number(trabajador.salario), // Total ganado real
+      haber_basico: Number(trabajador.haber_basico || 0),
+      bono_antiguedad: Number(trabajador.bono_antiguedad || 0),
+      horas_extra: Number(trabajador.monto_horas_extra || 0),
+      horas_extra_nocturnas: Number(trabajador.monto_horas_extra_nocturnas || 0),
+      otros_bonos: Number(trabajador.otros_bonos_pagos || 0),
+      dias_pagados: Number(trabajador.dias_pagados || 30),
+      cargo: trabajador.cargo,
+      matricula: trabajador.matricula
+    };
 
+    // 4. Realizar cálculos según PDF (casos complejos)
+    const calculoDetallado = await this.calcularSegunCasosPDF(baja_medica, datosReales, mes, gestion);
 
+    return {
+      mensaje: 'Cálculo realizado exitosamente',
+      datos_trabajador: datosReales,
+      baja_medica: baja_medica,
+      calculo: calculoDetallado
+    };
 
+  } catch (error) {
+    console.error('Error al calcular reembolso:', error);
+    throw error;
+  }
+} */
 
+//8.- CALCULAR REEMBOLSO CON DATOS QUEMADOS ----------------------------------------------------------------------------------------
+async calcularReembolsoConDatosReales(calcularDto: any) {
+  try {
+    const { matricula, cod_patronal, mes, gestion, baja_medica } = calcularDto;
 
+    // TEMPORALMENTE COMENTAMOS LA VALIDACIÓN DE PLANILLAS
+    /*
+    // 1. Buscar datos del trabajador en planillas de aportes usando el método correcto
+    const detallesTrabajador = await this.planillasService.obtenerDetallesDeMes(
+      cod_patronal, mes, gestion
+    );
+
+    // 2. Buscar el trabajador específico por matrícula
+    const trabajador = detallesTrabajador.find(
+      (detalle: any) => detalle.matricula === matricula
+    );
+
+    if (!trabajador) {
+      throw new NotFoundException(
+        `No se encontró el trabajador con matrícula ${matricula} en la planilla de ${mes}/${gestion}`
+      );
+    }
+    */
+
+    // 3. DATOS TEMPORALES (extraer CI de matrícula)
+    const ci = matricula.split(' ')[0];
+    const datosReales = {
+      ci: ci,
+      apellido_paterno: 'APELLIDO_PATERNO', // Temporal
+      apellido_materno: 'APELLIDO_MATERNO', // Temporal
+      nombres: 'NOMBRES_COMPLETOS',         // Temporal
+      salario_total: 8851,                  // Temporal
+      haber_basico: 8851,                   // Temporal
+      bono_antiguedad: 0,                 // Temporal
+      horas_extra: 0,                     // Temporal
+      horas_extra_nocturnas: 0,           // Temporal
+      otros_bonos: 0,                       // Temporal
+      dias_pagados: 30,                     // Temporal
+      cargo: 'CARGO_TEMPORAL',              // Temporal
+      matricula: matricula
+    };
+
+    // 4. Realizar cálculos según PDF (casos complejos)
+    const calculoDetallado = await this.calcularSegunCasosPDF(baja_medica, datosReales, mes, gestion);
+    console.log('calculoDetallado', calculoDetallado);
+
+    return {
+      mensaje: 'Cálculo realizado exitosamente (MODO TEMPORAL)',
+      datos_trabajador: datosReales,
+      baja_medica: baja_medica,
+      calculo: calculoDetallado
+    };
+
+  } catch (error) {
+    console.error('Error al calcular reembolso:', error);
+    throw error;
+  }
+}
+//MÉTODO AUXILIAR PARA CÁLCULOS SEGÚN PDF ----------------------------------------------------------------------------------------
+private async calcularSegunCasosPDF(bajaMedica: any, datosWorker: any, mesReembolso: string, gestionReembolso: string) {
+  // Extraer fechas de la baja médica
+  const fechaInicioBaja = new Date(bajaMedica.DIA_DESDE);
+  const fechaFinBaja = new Date(bajaMedica.DIA_HASTA);
   
+  // CALCULAR DÍAS CORRECTAMENTE (fecha fin - fecha inicio, SIN incluir último día)
+  const milisecondsDiff = fechaFinBaja.getTime() - fechaInicioBaja.getTime();
+  const diasCalculados = Math.floor(milisecondsDiff / (1000 * 60 * 60 * 24));
+  
+  console.log('fechaInicioBaja', fechaInicioBaja);
+  console.log('fechaFinBaja', fechaFinBaja);
+  console.log('diasCalculados', diasCalculados);
+  console.log('DIAS_IMPEDIMENTO original', bajaMedica.DIAS_IMPEDIMENTO);
+  
+  // Usar días calculados en lugar del DIAS_IMPEDIMENTO
+  const diasTotalesIncapacidad = diasCalculados;
+  
+  // Determinar tipo de incapacidad
+  const tipoIncapacidad = bajaMedica.TIPO_BAJA.trim();
+  
+  // Porcentajes según tipo
+  const porcentajes = {
+    'ENFERMEDAD': 75,
+    'MATERNIDAD': 90,
+    'PROFESIONAL': 90
+  };
+  
+  const porcentajeReembolso = porcentajes[tipoIncapacidad] || 75;
+  
+  // Calcular días de reembolso según tipo
+  let diasReembolso = 0;
+  
+  if (tipoIncapacidad === 'ENFERMEDAD') {
+    // Para enfermedad común, se descuentan los primeros 3 días
+    diasReembolso = Math.max(0, diasTotalesIncapacidad - 3);
+  } else if (tipoIncapacidad === 'MATERNIDAD') {
+    // Para maternidad, máximo 90 días
+    diasReembolso = Math.min(diasTotalesIncapacidad, 90);
+  } else if (tipoIncapacidad === 'PROFESIONAL') {
+    // Para riesgo profesional, todos los días desde el primer día
+    diasReembolso = diasTotalesIncapacidad;
+  }
+  
+  // Cálculos financieros
+  const salarioDiario = datosWorker.salario_total / 30; // Mes comercial
+  const montoReembolso = (salarioDiario * diasReembolso * porcentajeReembolso) / 100;
+  
+  console.log('tipoIncapacidad', tipoIncapacidad);
+  console.log('diasTotalesIncapacidad', diasTotalesIncapacidad);
+  console.log('diasReembolso', diasReembolso);
+  console.log('porcentajeReembolso', porcentajeReembolso);
+  console.log('salarioDiario', salarioDiario);
+  console.log('montoReembolso', montoReembolso);
+  
+  return {
+    tipo_incapacidad: tipoIncapacidad,
+    fecha_inicio_baja: fechaInicioBaja.toISOString().split('T')[0],
+    fecha_fin_baja: fechaFinBaja.toISOString().split('T')[0],
+    dias_incapacidad: diasTotalesIncapacidad, // Ahora usa días calculados
+    dias_reembolso: diasReembolso,
+    salario: datosWorker.salario_total,
+    monto_dia: parseFloat(salarioDiario.toFixed(6)),
+    porcentaje_reembolso: porcentajeReembolso,
+    monto_reembolso: parseFloat(montoReembolso.toFixed(6)),
+    desglose_salarial: {
+      haber_basico: datosWorker.haber_basico,
+      bono_antiguedad: datosWorker.bono_antiguedad,
+      horas_extra: datosWorker.horas_extra,
+      horas_extra_nocturnas: datosWorker.horas_extra_nocturnas,
+      otros_bonos: datosWorker.otros_bonos
+    }
+  };
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   //MÉTODOS AUXILIARES ----------------------------------------------------------------------------------------
 

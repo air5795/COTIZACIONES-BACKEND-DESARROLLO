@@ -88,4 +88,19 @@ async eliminarDetalle(@Param('idDetalle', ParseIntPipe) idDetalle: number) {
 async actualizarTotales(@Param('id', ParseIntPipe) id: number, @Body() totales: any) {
   return this.service.actualizarTotales(id, totales);
 }
+
+//8.- CALCULAR REEMBOLSO CON DATOS REALES ----------------------------------------------------------------------------------------
+@Post('calcular-reembolso')
+@ApiOperation({ summary: '8.- Calcular reembolso con datos de planillas de aportes' })
+@ApiResponse({ status: 200, description: 'Cálculo realizado exitosamente' })
+async calcularReembolso(@Body() calcularDto: {
+  matricula: string;
+  cod_patronal: string;
+  mes: string;
+  gestion: string;
+  baja_medica: any;
+  usuario_calculo?: string;
+}) {
+  return this.service.calcularReembolsoConDatosReales(calcularDto);
+}
 }
