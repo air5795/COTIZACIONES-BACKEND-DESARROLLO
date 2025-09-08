@@ -247,7 +247,7 @@ export class ExternalApiService {
 }
 
 async buscarBajasMedicas(matricula: string): Promise<any> {
-  console.log("🔍 Llamando a getCertificadoIncapacidadByParamMat con matrícula:", matricula);
+  console.log("🔍 Llamando a buscarBajasMedicas con matrícula:", matricula);
   
   return await this.handleRequest(async () => {
     const url = `${this.baseUrl}/gestion/getCertificadoIncapacidadByParamMat/${matricula}`;
@@ -260,19 +260,12 @@ async buscarBajasMedicas(matricula: string): Promise<any> {
       }),
     );
     
-    if (response.data?.bajasDB?.length > 0) {
-      return {
-        ok: true,
-        bajasDB: response.data.bajasDB
-      };
-    } else {
-      return {
-        ok: true,
-        bajasDB: []
-      };
-    }
-  }, 'getCertificadoIncapacidadByParamMat');
+    return response.data;
+  }, 'buscarBajasMedicas');
 }
+
+
+
 
 
 

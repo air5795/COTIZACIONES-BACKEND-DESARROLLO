@@ -395,8 +395,8 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
     }
 
     // 🚀 VALIDACIÓN DE TAMAÑO DE DATOS
-    if (datosValidos.length > 30000) {
-      throw new BadRequestException(`Los datos contienen ${datosValidos.length} registros. El máximo permitido es 30,000.`);
+    if (datosValidos.length > 50000) {
+      throw new BadRequestException(`Los datos contienen ${datosValidos.length} registros. El máximo permitido es 50,000.`);
     }
 
     console.log(`📊 Iniciando actualización de planilla ${id_planilla}:

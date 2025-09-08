@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Brackets } from 'typeorm';
 import { SolicitudesReembolso } from './entities/solicitudes_reembolso.entity';
+import { DetallesReembolso } from './entities/detalles_reembolso.entity';
 import { CreateSolicitudesReembolsoDto } from './dto/create-solicitudes_reembolso.dto';
 import { UpdateSolicitudesReembolsoDto } from './dto/update-solicitudes_reembolso.dto';
 import { EmpresasService } from '../../empresas/empresas.service';
@@ -13,6 +14,9 @@ export class ReembolsosIncapacidadesService {
     @InjectRepository(SolicitudesReembolso)
     private readonly reembolsoRepo: Repository<SolicitudesReembolso>,
     private readonly empresasService: EmpresasService,
+    @InjectRepository(DetallesReembolso)
+    private readonly detalleRepo: Repository<DetallesReembolso>,
+    private readonly externalApiService: ExternalApiService,
   ) {}
 
   //1.- CREAR SOLICITUD MENSUAL DE REEMBOLSO ----------------------------------------------------------------------------------------
@@ -83,14 +87,7 @@ export class ReembolsosIncapacidadesService {
     return solicitud;
   }
   //3.- OBTENER TODAS LAS SOLICITUDES POR CODIGO PATRONAL CON PAGINACIÓN Y FILTROS -------------------------------------------------------------------------
-  async obtenerSolicitudesPorCodPatronal(
-    cod_patronal: string,
-    pagina: number = 1,
-    limite: number = 10,
-    busqueda: string = '',
-    mes?: string,
-    anio?: string
-  ) {
+  async obtenerSolicitudesPorCodPatronal(cod_patronal: string,pagina: number = 1,limite: number = 10,busqueda: string = '',mes?: string,anio?: string) {
     try {
       // Validar parámetros
       if (pagina < 1 || limite < 1) {
@@ -172,5 +169,197 @@ export class ReembolsosIncapacidadesService {
       throw new BadRequestException(`Error al obtener las solicitudes de reembolso: ${error.message}`);
     }
   }
+    //4.- CREAR DETALLE DE REEMBOLSO ----------------------------------------------------------------------------------------
+  async crearDetalle(createDetalleDto: any) {
+    try {
+      // Verificar que la solicitud existe y está en estado BORRADOR (0)
+      const solicitud = await this.reembolsoRepo.findOne({
+        where: { id_solicitud_reembolso: createDetalleDto.id_solicitud_reembolso }
+      });
+
+      if (!solicitud) {
+        throw new NotFoundException('No se encontró la solicitud de reembolso');
+      }
+
+      if (solicitud.estado !== 0) {
+        throw new BadRequestException('Solo se pueden agregar detalles a solicitudes en estado BORRADOR');
+      }
+
+      // Crear el detalle
+      const nuevoDetalle = this.detalleRepo.create({
+        id_solicitud_reembolso: createDetalleDto.id_solicitud_reembolso,
+        nro: createDetalleDto.nro,
+        ci: createDetalleDto.ci,
+        apellido_paterno: createDetalleDto.apellido_paterno,
+        apellido_materno: createDetalleDto.apellido_materno,
+        nombres: createDetalleDto.nombres,
+        matricula: createDetalleDto.matricula,
+        tipo_incapacidad: createDetalleDto.tipo_incapacidad,
+        fecha_inicio_baja: new Date(createDetalleDto.fecha_inicio_baja),
+        fecha_fin_baja: new Date(createDetalleDto.fecha_fin_baja),
+        dias_incapacidad: createDetalleDto.dias_incapacidad,
+        dias_reembolso: createDetalleDto.dias_reembolso,
+        salario: createDetalleDto.salario,
+        monto_dia: createDetalleDto.monto_dia,
+        porcentaje_reembolso: createDetalleDto.porcentaje_reembolso,
+        monto_reembolso: createDetalleDto.monto_reembolso,
+        cotizaciones_previas_verificadas: createDetalleDto.cotizaciones_previas_verificadas || 0,
+        observaciones_afiliacion: createDetalleDto.observaciones_afiliacion,
+        observaciones: createDetalleDto.observaciones,
+        usuario_creacion: createDetalleDto.usuario_creacion || 'SYSTEM'
+      });
+
+      const detalleGuardado = await this.detalleRepo.save(nuevoDetalle);
+
+      // Actualizar los totales de la solicitud
+      await this.recalcularTotalesSolicitud(createDetalleDto.id_solicitud_reembolso);
+
+      return {
+        mensaje: 'Detalle de reembolso creado exitosamente',
+        id_detalle: detalleGuardado.id_detalle_reembolso,
+        detalle: detalleGuardado
+      };
+
+    } catch (error) {
+      console.error('Error al crear detalle de reembolso:', error);
+      throw error;
+    }
+  }
+
+  //5.- OBTENER DETALLES POR ID DE SOLICITUD ----------------------------------------------------------------------------------------
+  async obtenerDetallesPorSolicitud(idSolicitud: number) {
+    try {
+      const detalles = await this.detalleRepo.find({
+        where: { id_solicitud_reembolso: idSolicitud },
+        order: { nro: 'ASC' }
+      });
+
+      return {
+        mensaje: 'Detalles obtenidos exitosamente',
+        detalles: detalles,
+        total: detalles.length
+      };
+
+    } catch (error) {
+      console.error('Error al obtener detalles:', error);
+      throw new BadRequestException('Error al obtener los detalles de reembolso');
+    }
+  }
+
+  //6.- ELIMINAR DETALLE ----------------------------------------------------------------------------------------
+  async eliminarDetalle(idDetalle: number) {
+    try {
+      // Buscar el detalle
+      const detalle = await this.detalleRepo.findOne({
+        where: { id_detalle_reembolso: idDetalle },
+        relations: ['solicitud_reembolso']
+      });
+
+      if (!detalle) {
+        throw new NotFoundException('No se encontró el detalle de reembolso');
+      }
+
+      // Verificar que la solicitud esté en estado BORRADOR
+      if (detalle.solicitud_reembolso.estado !== 0) {
+        throw new BadRequestException('Solo se pueden eliminar detalles de solicitudes en estado BORRADOR');
+      }
+
+      const idSolicitud = detalle.id_solicitud_reembolso;
+
+      // Eliminar el detalle
+      await this.detalleRepo.remove(detalle);
+
+      // Recalcular números correlativos
+      await this.recalcularNumerosCorrelativos(idSolicitud);
+
+      // Actualizar totales
+      await this.recalcularTotalesSolicitud(idSolicitud);
+
+      return {
+        mensaje: 'Detalle eliminado exitosamente'
+      };
+
+    } catch (error) {
+      console.error('Error al eliminar detalle:', error);
+      throw error;
+    }
+  }
+
+  //7.- ACTUALIZAR TOTALES DE SOLICITUD ----------------------------------------------------------------------------------------
+  async actualizarTotales(idSolicitud: number, totales: any) {
+    try {
+      const solicitud = await this.reembolsoRepo.findOne({
+        where: { id_solicitud_reembolso: idSolicitud }
+      });
+
+      if (!solicitud) {
+        throw new NotFoundException('No se encontró la solicitud de reembolso');
+      }
+
+      // Actualizar totales
+      solicitud.total_reembolso = totales.total_reembolso;
+      solicitud.total_trabajadores = totales.total_trabajadores;
+      solicitud.usuario_modificacion = totales.usuario_modificacion || 'SYSTEM';
+      solicitud.fecha_modificacion = new Date();
+
+      await this.reembolsoRepo.save(solicitud);
+
+      return {
+        mensaje: 'Totales actualizados exitosamente',
+        solicitud: solicitud
+      };
+
+    } catch (error) {
+      console.error('Error al actualizar totales:', error);
+      throw error;
+    }
+  }
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  //MÉTODOS AUXILIARES ----------------------------------------------------------------------------------------
+
+  private async recalcularTotalesSolicitud(idSolicitud: number) {
+    // Obtener todos los detalles de la solicitud
+    const detalles = await this.detalleRepo.find({
+      where: { id_solicitud_reembolso: idSolicitud }
+    });
+
+    // Calcular totales
+    const totalReembolso = detalles.reduce((sum, detalle) => sum + Number(detalle.monto_reembolso), 0);
+    const totalTrabajadores = detalles.length;
+
+    // Actualizar la solicitud
+    await this.reembolsoRepo.update(idSolicitud, {
+      total_reembolso: totalReembolso,
+      total_trabajadores: totalTrabajadores,
+      fecha_modificacion: new Date()
+    });
+  }
+
+  private async recalcularNumerosCorrelativos(idSolicitud: number) {
+    const detalles = await this.detalleRepo.find({
+      where: { id_solicitud_reembolso: idSolicitud },
+      order: { fecha_creacion: 'ASC' }
+    });
+
+    // Actualizar números correlativos
+    for (let i = 0; i < detalles.length; i++) {
+      await this.detalleRepo.update(detalles[i].id_detalle_reembolso, {
+        nro: i + 1
+      });
+    }
+  }
+
   
 }

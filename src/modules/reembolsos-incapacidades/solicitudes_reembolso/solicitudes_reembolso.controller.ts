@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, ParseIntPipe, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, ParseIntPipe, Query, Patch, Delete } from '@nestjs/common';
 import { ReembolsosIncapacidadesService } from './solicitudes_reembolso.service';
 import { CreateSolicitudesReembolsoDto } from './dto/create-solicitudes_reembolso.dto';
 import { UpdateSolicitudesReembolsoDto } from './dto/update-solicitudes_reembolso.dto';
@@ -56,4 +56,36 @@ export class ReembolsosIncapacidadesController {
       anio
     );
   }
+
+  //4.- CREAR DETALLE DE REEMBOLSO ----------------------------------------------------------------------------------------
+@Post('detalles')
+@ApiOperation({ summary: '4.- Crear un detalle de reembolso (trabajador)' })
+@ApiResponse({ status: 201, description: 'Detalle creado con éxito' })
+async crearDetalle(@Body() createDetalleDto: any) {
+  return this.service.crearDetalle(createDetalleDto);
+}
+
+//5.- OBTENER DETALLES POR ID DE SOLICITUD ----------------------------------------------------------------------------------------
+@Get(':id/detalles')
+@ApiOperation({ summary: '5.- Obtener todos los detalles de una solicitud' })
+@ApiParam({ name: 'id', description: 'ID de la solicitud', type: Number })
+async obtenerDetallesPorSolicitud(@Param('id', ParseIntPipe) id: number) {
+  return this.service.obtenerDetallesPorSolicitud(id);
+}
+
+//6.- ELIMINAR DETALLE ----------------------------------------------------------------------------------------
+@Delete('detalles/:idDetalle')
+@ApiOperation({ summary: '6.- Eliminar un detalle de reembolso' })
+@ApiParam({ name: 'idDetalle', description: 'ID del detalle', type: Number })
+async eliminarDetalle(@Param('idDetalle', ParseIntPipe) idDetalle: number) {
+  return this.service.eliminarDetalle(idDetalle);
+}
+
+//7.- ACTUALIZAR TOTALES DE SOLICITUD ----------------------------------------------------------------------------------------
+@Patch(':id/totales')
+@ApiOperation({ summary: '7.- Actualizar totales de una solicitud' })
+@ApiParam({ name: 'id', description: 'ID de la solicitud', type: Number })
+async actualizarTotales(@Param('id', ParseIntPipe) id: number, @Body() totales: any) {
+  return this.service.actualizarTotales(id, totales);
+}
 }
