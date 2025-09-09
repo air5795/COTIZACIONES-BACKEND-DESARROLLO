@@ -374,12 +374,12 @@ export class ReembolsosIncapacidadesService {
 } */
 
 //8.- CALCULAR REEMBOLSO CON DATOS QUEMADOS ----------------------------------------------------------------------------------------
-async calcularReembolsoConDatosReales(calcularDto: any) {
+/* async calcularReembolsoConDatosReales(calcularDto: any) {
   try {
     const { matricula, cod_patronal, mes, gestion, baja_medica } = calcularDto;
 
     // TEMPORALMENTE COMENTAMOS LA VALIDACIÓN DE PLANILLAS
-    /*
+    
     // 1. Buscar datos del trabajador en planillas de aportes usando el método correcto
     const detallesTrabajador = await this.planillasService.obtenerDetallesDeMes(
       cod_patronal, mes, gestion
@@ -395,7 +395,7 @@ async calcularReembolsoConDatosReales(calcularDto: any) {
         `No se encontró el trabajador con matrícula ${matricula} en la planilla de ${mes}/${gestion}`
       );
     }
-    */
+    
 
     // 3. DATOS TEMPORALES (extraer CI de matrícula)
     const ci = matricula.split(' ')[0];
@@ -404,8 +404,8 @@ async calcularReembolsoConDatosReales(calcularDto: any) {
       apellido_paterno: 'APELLIDO_PATERNO', // Temporal
       apellido_materno: 'APELLIDO_MATERNO', // Temporal
       nombres: 'NOMBRES_COMPLETOS',         // Temporal
-      salario_total: 8851,                  // Temporal
-      haber_basico: 8851,                   // Temporal
+      salario_total: 9151,                  // Temporal
+      haber_basico: 9151,                   // Temporal
       bono_antiguedad: 0,                 // Temporal
       horas_extra: 0,                     // Temporal
       horas_extra_nocturnas: 0,           // Temporal
@@ -430,9 +430,9 @@ async calcularReembolsoConDatosReales(calcularDto: any) {
     console.error('Error al calcular reembolso:', error);
     throw error;
   }
-}
+} */
 //MÉTODO AUXILIAR PARA CÁLCULOS SEGÚN PDF ----------------------------------------------------------------------------------------
-private async calcularSegunCasosPDF(bajaMedica: any, datosWorker: any, mesReembolso: string, gestionReembolso: string) {
+/* private async calcularSegunCasosPDF(bajaMedica: any, datosWorker: any, mesReembolso: string, gestionReembolso: string) {
   // Extraer fechas de la baja médica
   const fechaInicioBaja = new Date(bajaMedica.DIA_DESDE);
   const fechaFinBaja = new Date(bajaMedica.DIA_HASTA);
@@ -504,9 +504,235 @@ private async calcularSegunCasosPDF(bajaMedica: any, datosWorker: any, mesReembo
       otros_bonos: datosWorker.otros_bonos
     }
   };
+} */
+
+//8.- CALCULAR REEMBOLSO CON DATOS REALES - MÉTODO CORREGIDO ----------------------------------------------------------------------------------------
+async calcularReembolsoConDatosReales(calcularDto: any) {
+  try {
+    const { matricula, cod_patronal, mes, gestion, baja_medica } = calcularDto;
+
+    console.log('🔍 Datos recibidos para cálculo:', {
+      matricula,
+      cod_patronal, 
+      mes,
+      gestion,
+      baja_medica: JSON.stringify(baja_medica, null, 2)
+    });
+
+    // 1. Buscar datos del trabajador en planillas de aportes usando el método correcto
+    const detallesTrabajador = await this.planillasService.obtenerDetallesDeMes(
+      cod_patronal, mes, gestion
+    );
+
+    // 2. Buscar el trabajador específico por matrícula
+    const trabajador = detallesTrabajador.find(
+      (detalle: any) => detalle.matricula === matricula
+    );
+
+    if (!trabajador) {
+      throw new NotFoundException(
+        `No se encontró el trabajador con matrícula ${matricula} en la planilla de ${mes}/${gestion}`
+      );
+    }
+
+    // 3. Extraer datos reales del trabajador
+    const datosReales = {
+      ci: trabajador.ci,
+      apellido_paterno: trabajador.apellido_paterno,
+      apellido_materno: trabajador.apellido_materno,
+      nombres: trabajador.nombres,
+      salario_total: Number(trabajador.salario), // Total ganado real
+      haber_basico: Number(trabajador.haber_basico || 0),
+      bono_antiguedad: Number(trabajador.bono_antiguedad || 0),
+      horas_extra: Number(trabajador.monto_horas_extra || 0),
+      horas_extra_nocturnas: Number(trabajador.monto_horas_extra_nocturnas || 0),
+      otros_bonos: Number(trabajador.otros_bonos_pagos || 0),
+      dias_pagados: Number(trabajador.dias_pagados || 30),
+      cargo: trabajador.cargo,
+      matricula: trabajador.matricula
+    };
+
+    // 4. Realizar cálculo corregido basado en el código del colega
+    const calculoDetallado = this.calcularSegunMetodoColega(baja_medica, datosReales, mes, gestion);
+
+    return {
+      mensaje: 'Cálculo realizado exitosamente',
+      datos_trabajador: datosReales,
+      baja_medica: baja_medica,
+      calculo: calculoDetallado
+    };
+
+  } catch (error) {
+    console.error('Error al calcular reembolso:', error);
+    throw error;
+  }
 }
 
+/**
+ * Método de cálculo basado en el código del colega en src/context/contexto-planilla-incapacidad.component.ts
+ * y la lógica del Excel analizado
+ */
+private calcularSegunMetodoColega(bajaMedica: any, datosWorker: any, mes: string, gestion: string) {
+  // 1. Extraer fechas de la baja médica
+  const fechaInicioBaja = new Date(bajaMedica.FECH_BAJA_INI);
+  const fechaFinBaja = new Date(bajaMedica.FECH_BAJA_FIN);
+  
+  // 2. Determinar tipo de incapacidad según el código
+  let tipoIncapacidad = 'ENFERMEDAD';
+  let porcentajeDecimal = 0.75;
+  let porcentajeEntero = 75;
+  let diasCarencia = 3;
 
+  // Mapear códigos según el sistema (usar TIPO_BAJA del servicio externo)
+  const tipoBaja = bajaMedica.TIPO_BAJA || bajaMedica.COD_INCAP || '1';
+  
+  switch (tipoBaja.toString().toUpperCase()) {
+    case '1':
+    case 'ENF':
+    case 'ENFERMEDAD':
+      tipoIncapacidad = 'ENFERMEDAD';
+      porcentajeDecimal = 0.75;
+      porcentajeEntero = 75;
+      diasCarencia = 3;
+      break;
+    case '2':
+    case 'MAT':
+    case 'MATERNIDAD':
+      tipoIncapacidad = 'MATERNIDAD';
+      porcentajeDecimal = 0.90;
+      porcentajeEntero = 90;
+      diasCarencia = 0; // Sin días de carencia
+      break;
+    case '3':
+    case 'PROF':
+    case 'PROFESIONAL':
+    case 'RIESGO':
+      tipoIncapacidad = 'PROFESIONAL';
+      porcentajeDecimal = 0.90;
+      porcentajeEntero = 90;
+      diasCarencia = 0; // Sin días de carencia
+      break;
+    default:
+      // Por defecto enfermedad común
+      tipoIncapacidad = 'ENFERMEDAD';
+      porcentajeDecimal = 0.75;
+      porcentajeEntero = 75;
+      diasCarencia = 3;
+  }
+
+  // 3. Calcular días totales de la baja
+  const unDia = 24 * 60 * 60 * 1000; // milisegundos en un día
+  const diasTotalesBaja = Math.round((fechaFinBaja.getTime() - fechaInicioBaja.getTime()) / unDia) + 1;
+
+  // 4. Verificar si la baja cruza meses (lógica del colega)
+  const mesActualIni = fechaInicioBaja.getMonth() + 1;
+  const mesActualFin = fechaFinBaja.getMonth() + 1;
+  
+  let fechaCotizacionDel: Date;
+  let fechaCotizacionAl: Date;
+  let diasReembolso: number;
+  let diasCbes: number;
+
+  if (mesActualIni !== mesActualFin) {
+    // La baja cruza meses - usar lógica especial del colega
+    
+    // Obtener último día del mes anterior
+    const ultimoDiaMesAnterior = new Date(fechaInicioBaja.getFullYear(), fechaInicioBaja.getMonth() + 1, 0);
+    const diasMesAnterior = Math.round((ultimoDiaMesAnterior.getTime() - fechaInicioBaja.getTime()) / unDia) + 1;
+    
+    // Reducir días de carencia basado en mes anterior
+    let diasCarenciaAjustada = diasCarencia;
+    if (diasMesAnterior <= diasCarencia) {
+      diasCarenciaAjustada = Math.max(0, diasCarencia - diasMesAnterior);
+    } else {
+      diasCarenciaAjustada = 0;
+    }
+
+    // Calcular para el mes actual (mes fin)
+    const inicioMesActual = new Date(fechaFinBaja.getFullYear(), fechaFinBaja.getMonth(), 1);
+    fechaCotizacionDel = inicioMesActual;
+    fechaCotizacionAl = fechaFinBaja;
+    
+    const diasEnMesActual = Math.round((fechaFinBaja.getTime() - inicioMesActual.getTime()) / unDia) + 1;
+    diasCbes = Math.max(0, diasEnMesActual - diasCarenciaAjustada);
+    diasReembolso = diasCbes;
+
+  } else {
+    // La baja está dentro del mismo mes - lógica normal
+    
+    // Control de hora de presentación (si es después de cierta hora, suma 1 día de carencia)
+    const horaBaja = fechaInicioBaja.getHours();
+    const horaLimite = 12; // 12:00 PM como límite según el código del colega
+    
+    let diasDiferencia = 0;
+    if (horaBaja > horaLimite) {
+      diasDiferencia = 1; // Día posterior si se presenta tarde
+    }
+
+    // Aplicar diferencia de días si corresponde
+    const fechaInicioCalculo = new Date(fechaInicioBaja);
+    fechaInicioCalculo.setDate(fechaInicioCalculo.getDate() + diasDiferencia);
+    
+    fechaCotizacionDel = fechaInicioCalculo;
+    fechaCotizacionAl = fechaFinBaja;
+    
+    const diasCalculados = Math.round((fechaFinBaja.getTime() - fechaInicioCalculo.getTime()) / unDia) + 1;
+    diasCbes = Math.max(0, diasCalculados - diasCarencia);
+    diasReembolso = diasCbes;
+  }
+
+  // 5. Cálculos financieros (basado en el Excel)
+  const totalDia = datosWorker.salario_total / 30; // Mes comercial de 30 días
+  const totalCobertura = totalDia * diasCbes;
+  const montoReembolso = totalCobertura * porcentajeDecimal;
+
+  // 6. Validaciones adicionales
+  
+  // Para maternidad, máximo 90 días total
+  if (tipoIncapacidad === 'MATERNIDAD') {
+    const diasMaximos = 90;
+    if (diasReembolso > diasMaximos) {
+      diasReembolso = diasMaximos;
+      diasCbes = diasMaximos;
+    }
+  }
+
+  console.log('=== CÁLCULO DETALLADO ===');
+  console.log('Tipo incapacidad:', tipoIncapacidad);
+  console.log('Días totales baja:', diasTotalesBaja);
+  console.log('Días carencia:', diasCarencia);
+  console.log('Días CBES (reembolso):', diasCbes);
+  console.log('Salario total:', datosWorker.salario_total);
+  console.log('Total día:', totalDia);
+  console.log('Total cobertura:', totalCobertura);
+  console.log('Porcentaje:', porcentajeEntero + '%');
+  console.log('Monto reembolso:', montoReembolso);
+  console.log('Fecha cotización del:', fechaCotizacionDel);
+  console.log('Fecha cotización al:', fechaCotizacionAl);
+
+  return {
+    tipo_incapacidad: tipoIncapacidad,
+    fecha_inicio_baja: fechaInicioBaja.toISOString().split('T')[0],
+    fecha_fin_baja: fechaFinBaja.toISOString().split('T')[0],
+    fecha_cotizacion_del: fechaCotizacionDel.toISOString().split('T')[0],
+    fecha_cotizacion_al: fechaCotizacionAl.toISOString().split('T')[0],
+    dias_incapacidad: diasTotalesBaja,
+    dias_reembolso: diasReembolso,
+    dias_cbes: diasCbes, // Añadir este campo que usa el colega
+    salario: datosWorker.salario_total,
+    monto_dia: parseFloat(totalDia.toFixed(6)),
+    porcentaje_reembolso: porcentajeEntero,
+    monto_reembolso: parseFloat(montoReembolso.toFixed(6)),
+    total_cobertura: parseFloat(totalCobertura.toFixed(6)), // Campo adicional para debug
+    desglose_salarial: {
+      haber_basico: datosWorker.haber_basico,
+      bono_antiguedad: datosWorker.bono_antiguedad,
+      horas_extra: datosWorker.horas_extra,
+      horas_extra_nocturnas: datosWorker.horas_extra_nocturnas,
+      otros_bonos: datosWorker.otros_bonos
+    }
+  };
+}
 
 
 
