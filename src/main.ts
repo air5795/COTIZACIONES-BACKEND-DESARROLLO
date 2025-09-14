@@ -21,10 +21,11 @@ async function bootstrap() {
   app.use(bodyParser.json({ limit: '50mb' }));
   app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
-  // Configurar serve-static para servir las imágenes de pagos-aportes
-  app.useStaticAssets(join(__dirname, '..', 'src', 'modules', 'pagos-aportes', 'pagos'), {
-    prefix: '/pagos-imagenes/',
+  // Configurar serve-static para servir los comprobantes de pago
+  app.useStaticAssets(join(process.cwd(), 'comprobantes'), {
+    prefix: '/comprobantes/',
   });
+  
 
   // Configurar serve-static para servir las imágenes de pagos-aportes-adicionales
   app.useStaticAssets(join(__dirname, '..', 'src', 'modules', 'pagos-aportes-adicionales', 'pagos'), {

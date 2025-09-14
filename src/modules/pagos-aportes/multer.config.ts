@@ -4,7 +4,7 @@ import { extname } from 'path';
 
 export const multerConfig = {
   storage: diskStorage({
-    destination: './src/modules/pagos-aportes/pagos', // Carpeta de destino
+    destination: './comprobantes', // Carpeta de destino
     filename: (req, file, callback) => {
       // Obtener id_planilla_aportes y fecha_pago del cuerpo de la solicitud
       const id_planilla_aportes = req.body.id_planilla_aportes || 'unknown';
