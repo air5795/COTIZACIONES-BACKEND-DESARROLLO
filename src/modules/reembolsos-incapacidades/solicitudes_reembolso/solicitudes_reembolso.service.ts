@@ -374,14 +374,14 @@ export class ReembolsosIncapacidadesService {
 } */
 
 //8.- CALCULAR REEMBOLSO CON DATOS QUEMADOS ----------------------------------------------------------------------------------------
-/* async calcularReembolsoConDatosReales(calcularDto: any) {
+ async calcularReembolsoConDatosReales(calcularDto: any) {
   try {
     const { matricula, cod_patronal, mes, gestion, baja_medica } = calcularDto;
 
     // TEMPORALMENTE COMENTAMOS LA VALIDACIÓN DE PLANILLAS
     
     // 1. Buscar datos del trabajador en planillas de aportes usando el método correcto
-    const detallesTrabajador = await this.planillasService.obtenerDetallesDeMes(
+/*     const detallesTrabajador = await this.planillasService.obtenerDetallesDeMes(
       cod_patronal, mes, gestion
     );
 
@@ -394,28 +394,28 @@ export class ReembolsosIncapacidadesService {
       throw new NotFoundException(
         `No se encontró el trabajador con matrícula ${matricula} en la planilla de ${mes}/${gestion}`
       );
-    }
+    } */
     
 
-    // 3. DATOS TEMPORALES (extraer CI de matrícula)
+    // DATOS TEMPORALES 
     const ci = matricula.split(' ')[0];
     const datosReales = {
       ci: ci,
-      apellido_paterno: 'APELLIDO_PATERNO', // Temporal
-      apellido_materno: 'APELLIDO_MATERNO', // Temporal
-      nombres: 'NOMBRES_COMPLETOS',         // Temporal
-      salario_total: 9151,                  // Temporal
-      haber_basico: 9151,                   // Temporal
-      bono_antiguedad: 0,                 // Temporal
-      horas_extra: 0,                     // Temporal
-      horas_extra_nocturnas: 0,           // Temporal
-      otros_bonos: 0,                       // Temporal
-      dias_pagados: 30,                     // Temporal
-      cargo: 'CARGO_TEMPORAL',              // Temporal
+      apellido_paterno: 'APELLIDO_PATERNO', 
+      apellido_materno: 'APELLIDO_MATERNO', 
+      nombres: 'NOMBRES_COMPLETOS',         
+      salario_total: 9151,                  
+      haber_basico: 9151,                  
+      bono_antiguedad: 0,                 
+      horas_extra: 0,                     
+      horas_extra_nocturnas: 0,           
+      otros_bonos: 0,                       
+      dias_pagados: 30,                     
+      cargo: 'CARGO_TEMPORAL',              
       matricula: matricula
     };
 
-    // 4. Realizar cálculos según PDF (casos complejos)
+    // calculos 
     const calculoDetallado = await this.calcularSegunCasosPDF(baja_medica, datosReales, mes, gestion);
     console.log('calculoDetallado', calculoDetallado);
 
@@ -430,9 +430,9 @@ export class ReembolsosIncapacidadesService {
     console.error('Error al calcular reembolso:', error);
     throw error;
   }
-} */
+} 
 //MÉTODO AUXILIAR PARA CÁLCULOS SEGÚN PDF ----------------------------------------------------------------------------------------
-/* private async calcularSegunCasosPDF(bajaMedica: any, datosWorker: any, mesReembolso: string, gestionReembolso: string) {
+ private async calcularSegunCasosPDF(bajaMedica: any, datosWorker: any, mesReembolso: string, gestionReembolso: string) {
   // Extraer fechas de la baja médica
   const fechaInicioBaja = new Date(bajaMedica.DIA_DESDE);
   const fechaFinBaja = new Date(bajaMedica.DIA_HASTA);
@@ -504,10 +504,10 @@ export class ReembolsosIncapacidadesService {
       otros_bonos: datosWorker.otros_bonos
     }
   };
-} */
+} 
 
 //8.- CALCULAR REEMBOLSO CON DATOS REALES - MÉTODO CORREGIDO ----------------------------------------------------------------------------------------
-async calcularReembolsoConDatosReales(calcularDto: any) {
+/* async calcularReembolsoConDatosReales(calcularDto: any) {
   try {
     const { matricula, cod_patronal, mes, gestion, baja_medica } = calcularDto;
 
@@ -566,13 +566,13 @@ async calcularReembolsoConDatosReales(calcularDto: any) {
     console.error('Error al calcular reembolso:', error);
     throw error;
   }
-}
+} */
 
 /**
  * Método de cálculo basado en el código del colega en src/context/contexto-planilla-incapacidad.component.ts
  * y la lógica del Excel analizado
  */
-private calcularSegunMetodoColega(bajaMedica: any, datosWorker: any, mes: string, gestion: string) {
+/* private calcularSegunMetodoColega(bajaMedica: any, datosWorker: any, mes: string, gestion: string) {
   // 1. Extraer fechas de la baja médica
   const fechaInicioBaja = new Date(bajaMedica.FECH_BAJA_INI);
   const fechaFinBaja = new Date(bajaMedica.FECH_BAJA_FIN);
@@ -732,7 +732,7 @@ private calcularSegunMetodoColega(bajaMedica: any, datosWorker: any, mes: string
       otros_bonos: datosWorker.otros_bonos
     }
   };
-}
+} */
 
 
 

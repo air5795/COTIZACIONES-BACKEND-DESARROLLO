@@ -96,7 +96,7 @@ async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Pro
     let nuevoPago: PagoAporte;
 
     if (file) {
-      const filePath = join('pagos-imagenes', file.filename);
+      const filePath = join('comprobantes', file.filename);
       pagoData.foto_comprobante = filePath;
       console.log('Archivo guardado en:', filePath);
     }
@@ -160,7 +160,7 @@ async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Pro
   } catch (error) {
     await queryRunner.rollbackTransaction();
     if (file && file.filename) {
-      const filePath = join(process.cwd(), 'pagos-aportes', 'pagos', file.filename);
+      const filePath = join(process.cwd(), 'comprobantes', file.filename);
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
       }
