@@ -38,3 +38,7 @@ lerna-debug.log*
 # Comprobantes - ignorar contenido pero mantener carpeta
 comprobantes/*
 !comprobantes/.gitkeep
+
+# recursos - ignorar contenido pero mantener carpeta
+recursos/*
+!recursos/.gitkeep

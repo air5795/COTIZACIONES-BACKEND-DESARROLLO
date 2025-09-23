@@ -25,6 +25,11 @@ async function bootstrap() {
   app.useStaticAssets(join(process.cwd(), 'comprobantes'), {
     prefix: '/comprobantes/',
   });
+
+  // Configurar serve-static para servir los recursos/manuales
+app.useStaticAssets(join(process.cwd(), 'recursos'), {
+  prefix: '/recursos/',
+});
   
 
   // Configurar serve-static para servir las imágenes de pagos-aportes-adicionales

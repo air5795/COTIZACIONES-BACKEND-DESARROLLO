@@ -29,7 +29,27 @@ export class PlanillasAportesController {
       const file = await this.planillasAportesService.descargarPlantilla();
       res.set({
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': 'attachment; filename="plantilla.xlsx"',
+        'Content-Disposition': 'attachment; filename="plantilla-extendida.xlsx"',
+      });
+      return file;
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  //* DESCARGAR PLANTILLA DE EXCEL PARA PLANILLAS DE APORTES (version corta) -----------------------------------------------------
+  
+  @Get('descargar-plantilla-corta')
+  @ApiTags('Reportes')
+  @ApiOperation({ summary: 'Descargar la plantilla Excel para aportes' })
+  @ApiResponse({ status: 200, description: 'Plantilla descargada con éxito', type: StreamableFile })
+  @ApiResponse({ status: 400, description: 'Error al descargar la plantilla' })
+  async descargarPlantillaCorta(@Res({ passthrough: true }) res): Promise<StreamableFile> {
+    try {
+      const file = await this.planillasAportesService.descargarPlantillaCorta();
+      res.set({
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="plantilla-corta.xlsx"',
       });
       return file;
     } catch (error) {
@@ -1542,6 +1562,71 @@ async obtenerDatosVerificacionGuardados(
         error: error.message || 'Error al obtener datos de verificación',
       },
       error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
+}
+
+
+
+//  ELIMINAR PLANILLA COMPLETA (CABECERA + DETALLES) SOLO SI ESTÁ EN ESTADO BORRADOR (0) -------
+@Delete(':id_planilla')
+@ApiOperation({ 
+  summary: 'Eliminar planilla completa (solo si está en estado BORRADOR)',
+  description: 'Elimina tanto la cabecera como todos los detalles de la planilla. Solo permitido para planillas en estado BORRADOR (0)'
+})
+@ApiParam({ 
+  name: 'id_planilla', 
+  description: 'ID de la planilla a eliminar', 
+  type: Number 
+})
+@ApiBody({
+  description: 'Usuario que realiza la eliminación (opcional)',
+  schema: {
+    type: 'object',
+    properties: {
+      usuario_eliminacion: { 
+        type: 'string', 
+        description: 'Usuario que realiza la eliminación',
+        example: 'admin@empresa.com'
+      }
+    }
+  },
+  required: false
+})
+@ApiResponse({ 
+  status: 200, 
+  description: 'Planilla eliminada correctamente'
+})
+@ApiResponse({ 
+  status: 400, 
+  description: 'Error de validación - Planilla no está en estado BORRADOR o tiene pagos asociados'
+})
+@ApiResponse({ 
+  status: 404, 
+  description: 'Planilla no encontrada'
+})
+async eliminarPlanillaCompleta(
+  @Param('id_planilla') id_planilla: number,
+  @Body() body?: { usuario_eliminacion?: string }
+) {
+  try {
+    const resultado = await this.planillasAportesService.eliminarPlanillaCompleta(
+      id_planilla,
+      body?.usuario_eliminacion
+    );
+    
+    console.log(`🗑️ Planilla ${id_planilla} eliminada completamente por:`, body?.usuario_eliminacion || 'SISTEMA');
+    
+    return resultado;
+  } catch (error) {
+    console.error(`❌ Error al eliminar planilla ${id_planilla}:`, error.message);
+    
+    throw new HttpException(
+      {
+        status: error.status || HttpStatus.BAD_REQUEST,
+        error: error.message,
+      },
+      error.status || HttpStatus.BAD_REQUEST,
     );
   }
 }

@@ -19,6 +19,8 @@ import { IncapacidadesReembolsoModule } from './modules/incapacidades-reembolso/
 import { TiposIncapacidadModule } from './modules/tipos-incapacidad/tipos-incapacidad.module';
 import { ReembolsosIncapacidadesModule } from './modules/reembolsos-incapacidades/solicitudes_reembolso/solicitudes_reembolso.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { RecursosModule } from './modules/recursos/recursos.module';
+import { DevengadosModule } from './modules/devengados/devengados.module';
 
 const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}?sslmode=disable`;
 
@@ -54,7 +56,9 @@ const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.e
     TiposIncapacidadModule,
     IncapacidadesReembolsoModule,
     ReembolsosIncapacidadesModule,
-    DashboardModule
+    DashboardModule,
+    RecursosModule,
+    DevengadosModule,
 
   ],
   controllers: [],

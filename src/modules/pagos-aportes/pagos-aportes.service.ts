@@ -95,14 +95,10 @@ async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Pro
   try {
     let nuevoPago: PagoAporte;
 
-    if (file) {
-      const uploadPath = join(process.cwd(), 'comprobantes');
-      if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
-      const filePath = join(uploadPath, file.filename);
-      fs.writeFileSync(filePath, file.buffer);
-      pagoData.foto_comprobante = 'comprobantes/' + file.filename;
-    
-      console.log('Archivo guardado en:', filePath);
+    if (file) { 
+      const filePath = join('comprobantes', file.filename); 
+      pagoData.foto_comprobante = filePath; 
+      console.log('Archivo guardado en:', filePath); 
     }
 
     // Crear y guardar el nuevo pago

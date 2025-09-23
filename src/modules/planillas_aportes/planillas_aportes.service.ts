@@ -20,7 +20,7 @@ import { ExternalApiService } from '../api-client/service/external-api.service';
 import pLimit from 'p-limit';
 import { number } from 'joi';
 import { PagoAporte } from '../pagos-aportes/entities/pagos-aporte.entity';
-
+import { DataSource } from 'typeorm';
 
 @Injectable()
 export class PlanillasAportesService {
@@ -42,12 +42,13 @@ export class PlanillasAportesService {
 
     private readonly empresasService: EmpresasService,
     private readonly externalApiService: ExternalApiService,
+    private readonly dataSource: DataSource,
   ) {}
 
 
-//* DESCARGAR PLANTILLA DE EXCEL PARA PLANILLAS DE APORTES
+//* DESCARGAR PLANTILLA DE EXCEL PARA PLANILLAS DE APORTES (version extendida)
 async descargarPlantilla(): Promise<StreamableFile> {
-  const filePath = path.resolve('reports/plantilla.xlsx',);
+  const filePath = path.resolve('reports/PLANTILLA-OFICIAL.xlsx',);
   console.log('Ruta generada:', filePath);
   if (!fs.existsSync(filePath)) {
     throw new BadRequestException('La plantilla no se encuentra en el servidor');
@@ -55,6 +56,19 @@ async descargarPlantilla(): Promise<StreamableFile> {
   const fileStream = fs.createReadStream(filePath);
   return new StreamableFile(fileStream);
 }
+
+//* DESCARGAR PLANTILLA DE EXCEL PARA PLANILLAS DE APORTES (version corta)
+async descargarPlantillaCorta(): Promise<StreamableFile> {
+  const filePath = path.resolve('reports/PLANTILLA-OFICIAL-CORTO.xlsx',);
+  console.log('Ruta generada:', filePath);
+  if (!fs.existsSync(filePath)) {
+    throw new BadRequestException('La plantilla no se encuentra en el servidor');
+  }
+  const fileStream = fs.createReadStream(filePath);
+  return new StreamableFile(fileStream);
+}
+
+
 //? MÉTODO AUXILIAR: Actualizar totales de la planilla mensual con todos sus adicionales
 private async actualizarTotalesPlanillaMensual(idPlanillaMensual: number, tipoEmpresa: string) {
   // Obtener todas las planillas relacionadas (mensual + adicionales)
@@ -109,7 +123,9 @@ procesarExcel(filePath: string) {
     try {
       const workbook = xlsx.readFile(filePath);
       const sheetName = workbook.SheetNames[0];  
-      const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+      const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]); 
+      /* const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { range: 1 }); */
+
 
       if (!data.length) {
         throw new BadRequestException('El archivo Excel está vacío o tiene un formato incorrecto');
@@ -242,29 +258,6 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
 
     const planillaGuardada = await queryRunner.manager.save(nuevaPlanilla);
 
-    // ✅ MANTENER TU FUNCIÓN parseExcelDate
-    function parseExcelDate(value: any): string | undefined {
-      if (!value) return undefined;
-      
-      if (typeof value === 'string') {
-        const cleanValue = value.trim();
-        if (cleanValue === '') return undefined;
-        
-        const parsedDate = moment(cleanValue, ['DD/MM/YYYY', 'YYYY-MM-DD', 'MM/DD/YYYY', 'DD-MM-YYYY'], true);
-        if (parsedDate.isValid()) {
-          return parsedDate.toISOString();
-        }
-        
-        throw new BadRequestException(`Formato de fecha no válido: "${cleanValue}"`);
-      }
-
-      if (typeof value === 'number' && !isNaN(value) && value > 0) {
-        const date = new Date(1900, 0, value - 1);
-        return isNaN(date.getTime()) ? undefined : date.toISOString();
-      }
-
-      return undefined;
-    }
 
     // ✅ LÓGICA PARA PLANILLAS ADICIONALES (OPTIMIZADA)
     let nroBase = 1;
@@ -283,8 +276,224 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
       nroBase = (parseInt(maxNroResult?.max || '0', 10) || 0) + 1;
     }
 
-    // ✅ PREPARAR DETALLES (mantener tu lógica)
+    // VALIDACIONES - MODIFICADAS PARA RECOPILAR ERRORES
+    // Array para recopilar todos los errores de validación
+    const erroresValidacion: string[] = [];
+
+    // FUNCIÓN DE VALIDACIÓN DE SEXO ------------------------------------------------------------------------------------------------------
+    const validarSexo = (sexo: any, fila: number, errores: string[]): string => {
+      const sexoStr = sexo?.toString()?.trim()?.toUpperCase();
+      if (!sexoStr) {
+        errores.push(`Fila ${fila}: El campo "Sexo" es obligatorio y no puede estar vacío.`);
+        return '';
+      }
+      if (!['M', 'F'].includes(sexoStr)) {
+        errores.push(`Fila ${fila}: El campo "Sexo" debe ser 'M' (Masculino) o 'F' (Femenino). Valor encontrado: "${sexo}"`);
+        return '';
+      }
+      return sexoStr;
+    };
+
+    // FUNCIÓN DE VALIDACIÓN DE REGIONAL ------------------------------------------------------------------------------------------------------
+    const validarRegional = (regional: any, fila: number, errores: string[]): string => {
+      const regionalStr = regional?.toString()?.trim()?.toUpperCase();
+      if (!regionalStr) {
+        errores.push(`Fila ${fila}: El campo "Regional" es obligatorio y no puede estar vacío.`);
+        return '';
+      }
+      
+      const regionalesValidas = [
+        'LA PAZ', 'COCHABAMBA', 'SANTA CRUZ', 'ORURO', 
+        'TARIJA', 'POTOSI', 'PANDO', 'BENI', 'CHUQUISACA'
+      ];
+      
+      if (!regionalesValidas.includes(regionalStr)) {
+        errores.push(`Fila ${fila}: El campo "Regional" debe ser uno de: ${regionalesValidas.join(', ')}. Valor encontrado: "${regional}"`);
+        return '';
+      }
+      
+      return regionalStr;
+    };
+
+    // FUNCIÓN DE VALIDACIÓN DE DÍAS PAGADOS ------------------------------------------------------------------------------------------------------
+    const validarDiasPagados = (diasPagados: any, fila: number, errores: string[]): number => {
+      const diasStr = diasPagados?.toString()?.trim();     
+      if (!diasStr) {
+        errores.push(`Fila ${fila}: El campo "Días pagados" es obligatorio y no puede estar vacío.`);
+        return 0;
+      }
+      if (!/^\d+$/.test(diasStr)) {
+        errores.push(`Fila ${fila}: El campo "Días pagados" debe contener solo números enteros sin puntos ni caracteres adicionales. Valor encontrado: "${diasPagados}"`);
+        return 0;
+      }
+      const dias = parseInt(diasStr, 10);
+      if (isNaN(dias)) {
+        errores.push(`Fila ${fila}: El campo "Días pagados" no es un número válido. Valor encontrado: "${diasPagados}"`);
+        return 0;
+      }
+      if (dias < 1 || dias > 31) {
+        errores.push(`Fila ${fila}: El campo "Días pagados" debe estar entre 1 y 31 días. Valor encontrado: ${dias}`);
+        return 0;
+      }
+      return dias;
+    };
+
+    // FUNCIÓN DE VALIDACIÓN DE APELLIDO PATERNO ------------------------------------------------------------------------------------------------------
+    const validarApellidoPaterno = (apellidoPaterno: any, fila: number, errores: string[]): string => {
+      const apellidoStr = apellidoPaterno?.toString()?.trim()?.toUpperCase();
+      if (!apellidoStr) {
+        errores.push(`Fila ${fila}: El campo "Apellido Paterno" es obligatorio. Si no tiene apellido paterno, coloque "0".`);
+        return '';
+      }
+      if (apellidoStr !== "0" && !/^[A-ZÁÉÍÓÚÑ\s]+$/.test(apellidoStr)) {
+        errores.push(`Fila ${fila}: El campo "Apellido Paterno" solo puede contener letras y espacios (sin tildes), o "0" si no tiene apellido paterno. Valor encontrado: "${apellidoPaterno}"`);
+        return apellidoStr;
+      }
+      return apellidoStr;
+    };
+
+    // FUNCIÓN DE VALIDACIÓN DE APELLIDO MATERNO ------------------------------------------------------------------------------------------------------
+    const validarApellidoMaterno = (apellidoMaterno: any, fila: number, errores: string[]): string => {
+      const apellidoStr = apellidoMaterno?.toString()?.trim()?.toUpperCase();
+      if (!apellidoStr) {
+        errores.push(`Fila ${fila}: El campo "Apellido Materno" es obligatorio. Si no tiene apellido materno, coloque "0".`);
+        return '';
+      }
+      if (apellidoStr !== "0" && !/^[A-ZÁÉÍÓÚÑ\s]+$/.test(apellidoStr)) {
+        errores.push(`Fila ${fila}: El campo "Apellido Materno" solo puede contener letras y espacios (sin tildes), o "0" si no tiene apellido materno. Valor encontrado: "${apellidoMaterno}"`);
+        return apellidoStr;
+      }      
+      return apellidoStr;
+    };
+
+    // FUNCIÓN DE VALIDACIÓN DE NOMBRES ------------------------------------------------------------------------------------------------------
+    const validarNombres = (nombres: any, fila: number, errores: string[]): string => {
+      const nombresStr = nombres?.toString()?.trim()?.toUpperCase();
+      
+      if (!nombresStr) {
+        errores.push(`Fila ${fila}: El campo "Nombres" es obligatorio y no puede estar vacío.`);
+        return '';
+      }
+      // Validar que solo contenga letras y espacios
+      if (!/^[A-ZÁÉÍÓÚÑ\s]+$/.test(nombresStr)) {
+        errores.push(`Fila ${fila}: El campo "Nombres" solo puede contener letras y espacios (sin tildes). Valor encontrado: "${nombres}"`);
+        return nombresStr;
+      }
+      // Validar longitud mínima (al menos 2 caracteres)
+      if (nombresStr.length < 2) {
+        errores.push(`Fila ${fila}: El campo "Nombres" debe tener al menos 2 caracteres. Valor encontrado: "${nombres}"`);
+        return nombresStr;
+      }
+      return nombresStr;
+    };
+
+    // FUNCIÓN DE VALIDACIÓN DE CARGO ------------------------------------------------------------------------------------------------------
+    const validarCargo = (cargo: any, fila: number, errores: string[]): string => {
+      const cargoStr = cargo?.toString()?.trim()?.toUpperCase();
+      if (!cargoStr) {
+        errores.push(`Fila ${fila}: El campo "Cargo" es obligatorio y no puede estar vacío.`);
+        return '';
+      }
+      // Validar longitud mínima (al menos 2 caracteres)
+      if (cargoStr.length < 2) {
+        errores.push(`Fila ${fila}: El campo "Cargo" debe tener al menos 2 caracteres. Valor encontrado: "${cargo}"`);
+        return cargoStr;
+      }
+      // Validar longitud máxima (máximo 100 caracteres)
+      if (cargoStr.length > 100) {
+        errores.push(`Fila ${fila}: El campo "Cargo" no puede exceder 100 caracteres. Longitud actual: ${cargoStr.length}`);
+        return cargoStr;
+      }
+      return cargoStr;
+    };
+
+    // FUNCIÓN DE VALIDACIÓN DE CAMPOS MONETARIOS ------------------------------------------------------------------------------------------------------
+    const validarCampoMonetario = (valor: any, nombreCampo: string, fila: number, errores: string[], esObligatorio: boolean = false): number => {
+      // Si es obligatorio y está vacío, agregar error
+      if (esObligatorio && (valor === null || valor === undefined || valor === '' || valor === 0)) {
+        errores.push(`Fila ${fila}: El campo "${nombreCampo}" es obligatorio y no puede estar vacío.`);
+        return 0;
+      }
+      // Si no es obligatorio y está vacío, retornar 0
+      if (!esObligatorio && (valor === null || valor === undefined || valor === '')) {
+        return 0;
+      }
+      // Usar la función parseOrZero existente para el parsing
+      return parseOrZero(valor);
+    };
+
+    // FUNCIÓN DE VALIDACIÓN DE FECHAS MODIFICADA ------------------------------------------------------------------------------------------------------
+    const validarFecha = (fechaValue: any, nombreCampo: string, fila: number, errores: string[], esObligatorio: boolean = true): string | undefined => {
+      if (!fechaValue) {
+        if (esObligatorio) {
+          errores.push(`Fila ${fila}: El campo "${nombreCampo}" es obligatorio y no puede estar vacío.`);
+        }
+        return undefined;
+      }
+      
+      let fechaParseada: Date | null = null;
+      
+      try {
+        // Si es un número (fecha serial de Excel)
+        if (typeof fechaValue === 'number') {
+          const excelEpoch = new Date(1899, 11, 30);
+          fechaParseada = new Date(excelEpoch.getTime() + fechaValue * 24 * 60 * 60 * 1000);
+        } 
+        // Si es string, intentar parsear formato dd/mm/yyyy
+        else if (typeof fechaValue === 'string') {
+          const fechaStr = fechaValue.toString().trim();
+          
+          // Validar formato dd/mm/yyyy con regex
+          const formatoValido = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.test(fechaStr);
+          if (!formatoValido) {
+            errores.push(`Fila ${fila}: El campo "${nombreCampo}" debe tener formato dd/mm/aaaa. Ejemplo: 24/03/1988. Valor encontrado: "${fechaValue}"`);
+            return undefined;
+          }
+          
+          // Extraer día, mes y año
+          const partes = fechaStr.split('/');
+          const dia = parseInt(partes[0], 10);
+          const mes = parseInt(partes[1], 10);
+          const anio = parseInt(partes[2], 10);
+          
+          // Crear fecha (mes - 1 porque Date usa índice 0-11 para meses)
+          fechaParseada = new Date(anio, mes - 1, dia);
+          
+          // Verificar si la fecha es válida
+          if (fechaParseada.getDate() !== dia || fechaParseada.getMonth() !== mes - 1 || fechaParseada.getFullYear() !== anio) {
+            errores.push(`Fila ${fila}: La "${nombreCampo}" no es válida. Verifique que el día, mes y año sean correctos. Valor encontrado: "${fechaValue}"`);
+            return undefined;
+          }
+        } 
+        // Si ya es un objeto Date
+        else if (fechaValue instanceof Date) {
+          fechaParseada = fechaValue;
+        } 
+        else {
+          errores.push(`Fila ${fila}: El campo "${nombreCampo}" tiene un formato no reconocido. Debe ser dd/mm/aaaa. Valor encontrado: "${fechaValue}"`);
+          return undefined;
+        }
+        
+        // Validar que la fecha sea válida
+        if (!fechaParseada || isNaN(fechaParseada.getTime())) {
+          errores.push(`Fila ${fila}: La "${nombreCampo}" no es válida. Valor encontrado: "${fechaValue}"`);
+          return undefined;
+        }
+        
+        return fechaParseada.toISOString();
+        
+      } catch (error) {
+        errores.push(`Fila ${fila}: Error al procesar la fecha "${nombreCampo}". Valor encontrado: "${fechaValue}"`);
+        return undefined;
+      }
+    };
+
+
+
+
+    // ✅ PREPARAR DETALLES CON VALIDACIÓN COMPLETA
     const detalles: CreatePlanillaAportesDetallesDto[] = data.map((row, index) => {
+      const fila = index + 1;
       const redondear = (valor: any): number => parseFloat(parseOrZero(valor).toFixed(6));
       const haberBasico = redondear(row['Haber Básico']);
       const bonoAntiguedad = redondear(row['Bono de antigüedad']);
@@ -294,27 +503,49 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
 
       return {
         id_planilla_aportes: planillaGuardada.id_planilla_aportes,
-        nro: tipo_planilla === 'Mensual' ? index + 1 : nroBase + index,
+        nro: tipo_planilla === 'Mensual' ? fila : nroBase + index,
         ci: row['Número documento de identidad']?.toString(),
-        apellido_paterno: row['Apellido Paterno']?.toString(),
-        apellido_materno: row['Apellido Materno']?.toString(),
-        nombres: row['Nombres']?.toString(),
-        sexo: row['Sexo (M/F)']?.toString(),
-        cargo: row['Cargo']?.toString(),
-        fecha_nac: parseExcelDate(row['Fecha de nacimiento']),
-        fecha_ingreso: parseExcelDate(row['Fecha de ingreso']),
-        fecha_retiro: parseExcelDate(row['Fecha de retiro']),
-        dias_pagados: parseInt(row['Días pagados'] || '0', 10) || null,
-        haber_basico: haberBasico,
-        bono_antiguedad: bonoAntiguedad,
-        monto_horas_extra: montoHorasExtra,
-        monto_horas_extra_nocturnas: montoHorasExtraNocturnas,
-        otros_bonos_pagos: otrosBonosPagos,
+        apellido_paterno: validarApellidoPaterno(row['Apellido Paterno'], fila, erroresValidacion),
+        apellido_materno: validarApellidoMaterno(row['Apellido Materno'], fila, erroresValidacion),
+        nombres: validarNombres(row['Nombres'], fila, erroresValidacion),
+        sexo: validarSexo(row['Sexo (M/F)'], fila, erroresValidacion),
+        cargo: validarCargo(row['Cargo'], fila, erroresValidacion),
+        fecha_nac: validarFecha(row['Fecha de nacimiento'], 'Fecha de nacimiento', fila, erroresValidacion, true),
+        fecha_ingreso: validarFecha(row['Fecha de ingreso'], 'Fecha de ingreso', fila, erroresValidacion, true),
+        fecha_retiro: row['Fecha de retiro'] ? validarFecha(row['Fecha de retiro'], 'Fecha de retiro', fila, erroresValidacion, false) : undefined,
+        dias_pagados: validarDiasPagados(row['Días pagados'], fila, erroresValidacion),
+
+        haber_basico: validarCampoMonetario(row['Haber Básico'], 'Haber Básico', fila, erroresValidacion, true),
+        bono_antiguedad: validarCampoMonetario(row['Bono de antigüedad'], 'Bono de antigüedad', fila, erroresValidacion, false),
+        monto_horas_extra: validarCampoMonetario(row['Monto horas extra'], 'Monto horas extra', fila, erroresValidacion, false),
+        monto_horas_extra_nocturnas: validarCampoMonetario(row['Monto horas extra nocturnas'], 'Monto horas extra nocturnas', fila, erroresValidacion, false),
+        otros_bonos_pagos: validarCampoMonetario(row['Otros bonos y pagos'], 'Otros bonos y pagos', fila, erroresValidacion, false),
+        
         salario: parseFloat((haberBasico + bonoAntiguedad + montoHorasExtra + montoHorasExtraNocturnas + otrosBonosPagos).toFixed(6)),
-        regional: row['regional']?.toString(),
+        regional: validarRegional(row['regional'], fila, erroresValidacion),
         tipo: tipo_planilla.toLowerCase().replace(' ', '_') as 'mensual' | 'planilla_adicional',
       };
     });
+
+    // ✅ VERIFICAR SI HAY ERRORES DE VALIDACIÓN Y LANZAR EXCEPCIÓN CON TODOS LOS ERRORES
+    if (erroresValidacion.length > 0) {
+      // Limitar el número de errores mostrados para evitar respuestas muy largas
+      const maxErrores = 50; // Mostrar máximo 50 errores
+      const erroresAMostrar = erroresValidacion.slice(0, maxErrores);
+      let mensajeError = `Se encontraron ${erroresValidacion.length} error(es) de validación en la planilla:\n\n`;
+      
+      erroresAMostrar.forEach((error, index) => {
+        mensajeError += `${index + 1}. ${error}\n`;
+      });
+
+      if (erroresValidacion.length > maxErrores) {
+        mensajeError += `\n... y ${erroresValidacion.length - maxErrores} error(es) adicional(es).\n`;
+      }
+
+      mensajeError += '\nPor favor, corrija todos los errores antes de volver a subir la planilla.';
+      
+      throw new BadRequestException(mensajeError);
+    }
 
     // 🚀 GUARDAR DETALLES EN LOTES USANDO QUERY RUNNER
     const batchSize = 1000;
@@ -4770,9 +5001,6 @@ async buscarPlanillaMesAnterior(codPatronal: string, fechaActual: Date): Promise
   }
 }
 
-
-// Agregar este nuevo método en tu planillas_aportes.service.ts
-
 // 31.- OBTENER DATOS DE VERIFICACIÓN GUARDADOS DE CRUCE DE AFILIACIONES
 async obtenerDatosVerificacionGuardados(idPlanilla: number): Promise<any> {
   try {
@@ -4919,5 +5147,130 @@ private async guardarPagoDesembolsoTGN(idPlanilla: number, fechaPago: Date, mont
     throw new BadRequestException(`Error al guardar pago del desembolso TGN: ${error.message}`);
   }
 }
+
+// ELIMINAR PLANILLA COMPLETA (CABECERA + DETALLES) SOLO SI ESTÁ EN ESTADO BORRADOR (0) -------
+async eliminarPlanillaCompleta(id_planilla: number, usuario_eliminacion?: string) {
+  // Usar QueryRunner para transacción
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  try {
+    // 1. Buscar la planilla
+    const planilla = await queryRunner.manager.findOne(PlanillasAporte, { 
+      where: { id_planilla_aportes: id_planilla },
+      relations: ['empresa']
+    });
+
+    if (!planilla) {
+      throw new BadRequestException('La planilla no existe');
+    }
+
+    // 2. Validar que la planilla esté en estado BORRADOR (0)
+    if (planilla.estado !== 0) {
+      const estados = {
+        1: 'PRESENTADA',
+        2: 'APROBADA', 
+        3: 'OBSERVADA'
+      };
+      throw new BadRequestException(
+        `No se puede eliminar la planilla. Estado actual: ${estados[planilla.estado] || 'DESCONOCIDO'}. Solo se pueden eliminar planillas en estado BORRADOR.`
+      );
+    }
+
+    // 3. Verificar si tiene pagos asociados (restricción adicional de seguridad)
+    const pagosAsociados = await queryRunner.manager.count(PagoAporte, {
+      where: { id_planilla_aportes: id_planilla }
+    });
+
+    if (pagosAsociados > 0) {
+      throw new BadRequestException(
+        'No se puede eliminar la planilla porque tiene pagos asociados'
+      );
+    }
+
+    // 4. Contar cuántos detalles tiene antes de eliminar
+    const totalDetalles = await queryRunner.manager.count(PlanillaAportesDetalles, {
+      where: { id_planilla_aportes: id_planilla }
+    });
+
+    console.log(`🗑️ Eliminando planilla ${id_planilla} con ${totalDetalles} trabajadores...`);
+
+    // 5. Eliminar PRIMERO los detalles (por la relación FK)
+    await queryRunner.manager.delete(PlanillaAportesDetalles, { 
+      id_planilla_aportes: id_planilla 
+    });
+
+    console.log(`✅ Eliminados ${totalDetalles} detalles de la planilla`);
+
+    // 6. Eliminar la planilla principal
+    await queryRunner.manager.delete(PlanillasAporte, { 
+      id_planilla_aportes: id_planilla 
+    });
+
+    console.log(`✅ Planilla ${id_planilla} eliminada completamente`);
+
+    // 7. Confirmar transacción
+    await queryRunner.commitTransaction();
+
+    // 8. Crear notificación de eliminación
+    if (planilla.empresa) {
+      const meses = [
+        'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
+        'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
+      ];
+      
+      const nombreMes = meses[Number(planilla.mes) - 1];
+      
+      const notificacionDto = {
+        id_usuario_receptor: 'COTIZACIONES_EMPRESA',
+        tipo_notificacion: 'PLANILLA_ELIMINADA',
+        empresa: planilla.empresa.emp_nom,
+        mensaje: `Planilla Mensual ELIMINADA correspondiente a MES: ${nombreMes}, AÑO: ${planilla.gestion} - Total trabajadores eliminados: ${totalDetalles}`,
+        id_recurso: id_planilla,
+        tipo_recurso: 'PLANILLA_APORTES',
+        usuario_creacion: usuario_eliminacion || 'SISTEMA',
+        nom_usuario: usuario_eliminacion || 'Sistema Automático',
+      };
+
+      try {
+        await this.notificacionesService.crearNotificacion(notificacionDto);
+      } catch (notifError) {
+        console.error('Error al crear notificación de eliminación:', notifError);
+        // No fallar la eliminación por error en notificación
+      }
+    }
+
+    return {
+      mensaje: '✅ Planilla eliminada completamente con éxito',
+      datos: {
+        id_planilla_eliminada: id_planilla,
+        empresa: planilla.empresa?.emp_nom || 'Sin empresa',
+        mes: planilla.mes,
+        gestion: planilla.gestion,
+        total_trabajadores_eliminados: totalDetalles,
+        cod_patronal: planilla.cod_patronal
+      }
+    };
+
+  } catch (error) {
+    // Hacer rollback en caso de error
+    await queryRunner.rollbackTransaction();
+    console.error('Error al eliminar planilla completa:', error);
+    
+    if (error instanceof BadRequestException) {
+      throw error;
+    }
+    
+    throw new BadRequestException(
+      `Error al eliminar la planilla: ${error.message}`
+    );
+  } finally {
+    // Liberar el QueryRunner
+    await queryRunner.release();
+  }
+}
+
+
 
 }
