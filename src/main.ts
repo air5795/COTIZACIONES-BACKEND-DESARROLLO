@@ -53,34 +53,39 @@ app.useStaticAssets(join(process.cwd(), 'recursos'), {
   app.useGlobalInterceptors(new ClassSerializerInterceptor(reflector));
   app.setGlobalPrefix('api/v1');
 
-  const config = new DocumentBuilder()
-    .setTitle('CBES - Caja Bancaria Estatal de Salud')
-    .setDescription('DOCUMENTACION DEL SISTEMA DE COTIZACIONES - DESARROLLO')
-/*     .setVersion('1.0')
-        .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Ingresa el token JWT (ejemplo: "Bearer <token>")',
-      },
-      'JWT-auth',
-    ) */
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/v1/docs', app, document, {
-    swaggerOptions: {
-      filter: true,
-    },
-    customCssUrl: '/public/custom-swagger.css', // Inyectar el CSS personalizado
-  });
+// ✅ CONFIGURACIÓN SWAGGER CON BEARER AUTH
+const config = new DocumentBuilder()
+.setTitle('CBES - Caja Bancaria Estatal de Salud')
+.setDescription('DOCUMENTACION DEL SISTEMA DE COTIZACIONES - DESARROLLO')
+.setVersion('1.0')
+.addBearerAuth(
+  {
+    type: 'http',
+    scheme: 'bearer',
+    bearerFormat: 'JWT',
+    name: 'Authorization',
+    description: 'Ingresa el token JWT obtenido del login',
+    in: 'header',
+  },
+  'JWT-auth', // Este nombre se usa en @ApiBearerAuth('JWT-auth')
+)
+.build();
 
-  app.enableCors();
+const document = SwaggerModule.createDocument(app, config);
+SwaggerModule.setup('api/v1/docs', app, document, {
+swaggerOptions: {
+  filter: true,
+  persistAuthorization: true, // Mantiene el token entre recargas
+},
+customCssUrl: '/public/custom-swagger.css',
+});
 
-  await app.listen(process.env.PORT || 4001);
-  logger.log(
-    `API-SisAdmin Ready: Development on Line! on PORT: ${process.env.PORT || 4001}`,
-  );
+app.enableCors();
+
+await app.listen(process.env.PORT || 4001);
+logger.log(
+`API-SisAdmin Ready: Development on Line! on PORT: ${process.env.PORT || 4001}`,
+);
 }
 
 bootstrap();

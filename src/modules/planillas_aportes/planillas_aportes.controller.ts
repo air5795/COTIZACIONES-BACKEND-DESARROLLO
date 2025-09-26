@@ -2,7 +2,7 @@ import { Controller, Post, Get,StreamableFile, UseInterceptors, UploadedFile, Ba
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { PlanillasAportesService } from './planillas_aportes.service';
-import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { query, Response } from 'express';
 import { CreatePlanillasAporteDto } from './dto/create-planillas_aporte.dto';
 import * as fs from 'fs';
@@ -11,6 +11,7 @@ import { Observable } from 'rxjs';
 
 
 @ApiTags('Planillas Aportes')
+@ApiBearerAuth('JWT-auth') 
 @Controller('planillas_aportes')
 export class PlanillasAportesController {
   constructor(

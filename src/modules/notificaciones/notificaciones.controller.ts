@@ -1,9 +1,10 @@
 import { Controller, Get, Post, Query, Param, Body, BadRequestException, ParseIntPipe } from '@nestjs/common';
 import { NotificacionesService } from './notificaciones.service';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { UpdateNotificacioneDto } from './dto/update-notificacione.dto';
 
 @ApiTags('Notificaciones')
+@ApiBearerAuth('JWT-auth') 
 @Controller('notificaciones')
 export class NotificacionesController {
   constructor(private notificacionesService: NotificacionesService) {}

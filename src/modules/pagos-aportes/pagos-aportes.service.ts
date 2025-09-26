@@ -475,6 +475,68 @@ async obtenerDemasiaMesAnterior(idPlanillaActual: number): Promise<number> {
     }
   }
 
+  // Función helper para formatear números a 2 decimales
+  private formatNumber(value: number | string | null | undefined): number {
+    if (value === null || value === undefined) return 0;
+    
+    // Convertir a número si es string
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    
+    // Verificar si es un número válido
+    if (isNaN(numValue)) return 0;
+    
+    // Redondear a 2 decimales y devolver como número
+    return Math.round(numValue * 100) / 100;
+  }
+
+  // Nuevo método para buscar pagos por com_nro con detalles (servicio para sistema de ingresos Isra)
+  async findByComNroWithDetails(com_nro: number) {
+    try {
+      const pagos = await this.pagoAporteRepository
+        .createQueryBuilder('pago')
+        .leftJoinAndSelect('pago.planilla', 'planilla')
+        .leftJoinAndSelect('planilla.empresa', 'empresa')
+        .where('planilla.com_nro = :com_nro', { com_nro })
+        .getMany();
+
+      if (pagos.length === 0) {
+        return {
+          mensaje: `No se encontraron pagos para el com_nro: ${com_nro}`,
+          pagos: [],
+        };
+      }
+
+      const pagosFormateados = pagos.map((pago) => ({
+        ID_PLANILLA_APORTES: pago.id_planilla_aportes,
+        EMPRESA: pago.planilla?.empresa?.emp_nom || 'No disponible',
+        COD_PATRONAL: pago.planilla?.cod_patronal || 'No disponible',
+        COM_NRO: pago.planilla?.com_nro || 'No disponible',
+        FECHA_PAGO: pago.fecha_pago ? moment(pago.fecha_pago).format('DD/MM/YYYY') : 'N/A',
+        MONTO_PAGADO: this.formatNumber(pago.monto_pagado),
+        METODO_PAGO: pago.metodo_pago || 'N/A',
+        COMPROBANTE_PAGO: pago.comprobante_pago || 'N/A',
+        USUARIO_CREACION: pago.usuario_creacion || 'N/A',
+        FECHA_CREACION: pago.fecha_creacion ? moment(pago.fecha_creacion).format('DD/MM/YYYY HH:mm:ss') : 'N/A',
+        OBSERVACIONES: pago.observaciones || 'Sin observaciones',   
+        FECHA_PLANILLA: pago.planilla?.fecha_planilla? moment(pago.planilla.fecha_planilla).format('DD/MM/YYYY'): 'No disponible',
+        MONTO_DEMASIA: this.formatNumber(pago.monto_demasia),
+        MES: pago.planilla?.mes || 'No disponible',
+        GESTION: pago.planilla?.gestion || 'No disponible',
+        TIPO_PLANILLA: pago.planilla?.tipo_planilla || 'No disponible',
+        TOTAL_IMPORTE_PLANILLA: this.formatNumber(pago.planilla?.total_importe), 
+        TOTAL_TRABAJ_PLANILLA: pago.planilla?.total_trabaj || 0,
+      }));
+
+      return {
+        mensaje: `Pagos encontrados para com_nro: ${com_nro}`,
+        total_registros: pagos.length,
+        pagos: pagosFormateados,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Error al buscar pagos por com_nro: ${error.message}`);
+    }
+  }
+
   // ACTUALIZAR OBSERVACIONES DE UN PAGO
   async updateObservaciones(id: number, observaciones: string, usuario_modificacion?: string) {
     try {

@@ -4,6 +4,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('Pagos-aportes')
+@ApiBearerAuth('JWT-auth')    
 @Controller('pagos-aportes')
 export class PagosAportesController {
   constructor(private readonly pagosAportesService: PagosAportesService) {}
@@ -92,6 +93,72 @@ export class PagosAportesController {
         {
           status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
           error: error.message || 'Error al listar los pagos con detalles',
+        },
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // Nuevo endpoint para buscar pagos por com_nro con detalles
+  @Get('by-com-nro/:com_nro')
+  @ApiOperation({ summary: 'Buscar pagos por com_nro con todos los detalles de planilla y empresa' })
+  @ApiParam({ name: 'com_nro', description: 'Número de comprobante (com_nro)', type: Number })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Pagos encontrados exitosamente',
+    schema: {
+      type: 'object',
+      properties: {
+        mensaje: { type: 'string' },
+        total_registros: { type: 'number' },
+        pagos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'number' },
+              id_planilla_aportes: { type: 'number' },
+              numero_recibo: { type: 'number' },
+              fecha_pago: { type: 'string' },
+              monto_pagado: { type: 'number' },
+              metodo_pago: { type: 'string' },
+              comprobante_pago: { type: 'string' },
+              foto_comprobante: { type: 'string' },
+              estado: { type: 'number' },
+              estado_envio: { type: 'number' },
+              observaciones: { type: 'string' },
+              empresa: { type: 'string' },
+              fecha_planilla: { type: 'string' },
+              monto_demasia: { type: 'number' },
+              com_nro: { type: 'number' },
+              cod_patronal: { type: 'string' },
+              mes: { type: 'string' },
+              gestion: { type: 'string' },
+              tipo_planilla: { type: 'string' },
+              total_importe: { type: 'number' },
+              total_trabaj: { type: 'number' }
+            }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 400, description: 'Error al buscar pagos por com_nro' })
+  @ApiResponse({ status: 404, description: 'No se encontraron pagos para el com_nro especificado' })
+  async findByComNroWithDetails(@Param('com_nro') com_nro: number) {
+    try {
+      const parsedComNro = parseInt(com_nro.toString(), 10);
+      
+      if (isNaN(parsedComNro) || parsedComNro < 1) {
+        throw new BadRequestException(`El com_nro debe ser un número positivo, recibido: ${com_nro}`);
+      }
+
+      return await this.pagosAportesService.findByComNroWithDetails(parsedComNro);
+    } catch (error) {
+      throw new HttpException(
+        {
+          status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+          error: error.message || 'Error al buscar pagos por com_nro',
         },
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );

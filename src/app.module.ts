@@ -1,6 +1,9 @@
+// src/app.module.ts
 import { Module } from '@nestjs/common';
 import * as Joi from 'joi';
 import { ConfigModule } from '@nestjs/config';
+import { HttpModule } from '@nestjs/axios'; // ✅ IMPORTANTE: Importar HttpModule
+import { APP_GUARD } from '@nestjs/core';
 import { DatabaseModule } from './core/database/database.module';
 import config from './core/config/config';
 import { enviroments } from './core/config/enviroments';
@@ -21,6 +24,8 @@ import { ReembolsosIncapacidadesModule } from './modules/reembolsos-incapacidade
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { RecursosModule } from './modules/recursos/recursos.module';
 import { DevengadosModule } from './modules/devengados/devengados.module';
+import { ExternalAuthValidationService } from './core/services/external-auth-validation.service';
+import { JwtAuthGuard } from './core/guards/jwt-auth.guard';
 
 const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}?sslmode=disable`;
 
@@ -33,6 +38,12 @@ const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.e
       validationSchema: Joi.object({
         DATABASE_URL: db,
       }),
+    }),
+
+    // ✅ AGREGAR HttpModule aquí
+    HttpModule.register({
+      timeout: 10000, // 10 segundos timeout
+      maxRedirects: 5,
     }),
 
     ServeStaticModule.forRoot({
@@ -59,9 +70,17 @@ const db = `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.e
     DashboardModule,
     RecursosModule,
     DevengadosModule,
-
   ],
   controllers: [],
-  providers: [],
+  providers: [
+    // ✅ Registrar el servicio de validación
+    ExternalAuthValidationService,
+    
+    // ✅ Aplicar guard globalmente a TODOS los endpoints
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+  ],
 })
 export class AppModule {}

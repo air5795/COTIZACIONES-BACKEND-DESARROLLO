@@ -22,7 +22,10 @@ import { RecursosService } from './recursos.service';
 import { CreateRecursoDto } from './dto/create-recurso.dto';
 import { UpdateRecursoDto } from './dto/update-recurso.dto';
 import { FilterRecursoDto } from './dto/filter-recurso.dto';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 
+@ApiTags('Recursos')
+@ApiBearerAuth('JWT-auth') 
 @Controller('recursos')
 export class RecursosController {
   constructor(private readonly recursosService: RecursosService) {}
