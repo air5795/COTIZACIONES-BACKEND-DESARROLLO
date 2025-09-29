@@ -28,6 +28,9 @@ export class PagoAporte {
   @Column({ nullable: true })
   comprobante_pago: string;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  total_a_cancelar: number;
+
   @Column({ nullable: true })
   foto_comprobante: string;
 

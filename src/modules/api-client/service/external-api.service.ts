@@ -13,9 +13,6 @@ export class ExternalApiService {
   private loginPromise: Promise<any> | null = null;
 
   constructor(private readonly httpService: HttpService) {
-    console.log('EXTERNAL_API_URL:', this.baseUrl);
-    console.log('API_USERNAME:', this.userName);
-    console.log('API_PASSWORD:', this.password);
   }
 
   async loginToExternalApi() {
@@ -29,7 +26,6 @@ export class ExternalApiService {
 
     this.loginPromise = (async () => {
       try {
-        console.log('🔑 Iniciando sesión en API externa...');
         
         const response = await firstValueFrom(
           this.httpService.post(`${this.baseUrl}/security/login`, params, {
@@ -41,8 +37,6 @@ export class ExternalApiService {
 
         this.apiToken = response.data.token;
         
-        console.log('✅ Login exitoso, token obtenido');
-        console.log('📋 Respuesta completa del login:', JSON.stringify(response.data, null, 2));
 
         return {
           status: true,
@@ -50,7 +44,6 @@ export class ExternalApiService {
           message: 'Inicio de sesión exitoso',
         };
       } catch (error) {
-        console.error('❌ Error al iniciar sesión en API externa:', error.response?.data || error.message);
         this.apiToken = null;
         throw new Error(`Error al iniciar sesión en la API externa: ${error.message}`);
       } finally {
@@ -64,7 +57,6 @@ export class ExternalApiService {
   private async handleRequest<T>(requestFn: () => Promise<T>, methodName: string): Promise<T> {
     // Si no tenemos token, obtenerlo primero
     if (!this.apiToken) {
-      console.log(`🔑 No hay token disponible para ${methodName}, obteniendo uno nuevo...`);
       await this.loginToExternalApi();
     }
 
@@ -73,7 +65,6 @@ export class ExternalApiService {
     } catch (error: any) {
       // Si recibimos un 401, el token está expirado/inválido
       if (error.response?.status === 401) {
-        console.log(`🔄 Error 401 en ${methodName}, el token ha expirado. Renovando...`);
         
         // Limpiar token actual e intentar renovar
         this.apiToken = null;
@@ -81,10 +72,8 @@ export class ExternalApiService {
         try {
           await this.loginToExternalApi();
           // Reintentar la petición con el nuevo token
-          console.log(`🔁 Reintentando ${methodName} con nuevo token...`);
           return await requestFn();
         } catch (loginError) {
-          console.error(`❌ Error al renovar token en ${methodName}:`, loginError);
           throw new Error(`Error de autenticación en ${methodName}: ${loginError.message}`);
         }
       }
@@ -99,7 +88,6 @@ export class ExternalApiService {
   }
 
   async getEmpresaByNroPatronal(npatronal: string): Promise<any> {
-    console.log("🔍 Llamando a getEmpresaByNroPatronal con nroPatronal:", npatronal);
     
     return await this.handleRequest(async () => {
       const url = `${this.baseUrl}/modelo/getEmpresaByNroPatronal/${npatronal}`;
@@ -117,11 +105,9 @@ export class ExternalApiService {
   }
 
   async getAllEmpresas(): Promise<any> {
-    console.log("🔍 Llamando a getAllEmpresas");
     
     return await this.handleRequest(async () => {
       const url = `${this.baseUrl}/modelo/getAllEmpresas`;
-      console.log("URL de consulta:", url);
 
       const response = await firstValueFrom(
         this.httpService.get(url, {
@@ -154,7 +140,6 @@ export class ExternalApiService {
   } */
 
   async getAseguradoByCi(ci: string): Promise<any> {
-    console.log("🔍 Llamando a getAseguradoByCi con CI:", ci);
     
     return await this.handleRequest(async () => {
       const url = `${this.baseUrl}/modelo/getDatosAseguradoByAseCi/${ci}`;
@@ -177,7 +162,6 @@ export class ExternalApiService {
   }
 
   async getAseguradoByMatricula(matricula: string): Promise<any> {
-    console.log("🔍 Llamando a getAseguradoByMatricula con matrícula:", matricula);
     
     return await this.handleRequest(async () => {
       const url = `${this.baseUrl}/modelo/getDatosAseguradoByAseMat/${matricula}`;
@@ -200,15 +184,12 @@ export class ExternalApiService {
   }
 
   async getAllAseguradosByNroPatronal(npatronal: string): Promise<any> {
-  console.log("Llamando a getAllAseguradosByNroPatronal con nroPatronal:", npatronal);
   
   if (!this.apiToken) {
-    console.error('Token no disponible en getAllAseguradosByNroPatronal');
     throw new Error('Token no disponible');
   }
 
   const url = `${this.baseUrl}/modelo/getAllAseguradosByNroPatronal/${npatronal}`;
-  console.log("URL de consulta:", url);
 
   try {
     const response = await firstValueFrom(
@@ -219,10 +200,6 @@ export class ExternalApiService {
       }),
     );
     
-    console.log(`✅ Respuesta exitosa para patrón ${npatronal}:`, {
-      status: response.data.ok,
-      totalAsegurados: response.data.datosAsegurado?.length || 0
-    });
 
     if (response.data.ok && response.data.datosAsegurado) {
       return {
@@ -241,13 +218,11 @@ export class ExternalApiService {
     }
 
   } catch (error) {
-    console.error("Error al obtener asegurados por número patronal:", error);
     throw new Error(`Error al obtener asegurados por número patronal: ${error.message}`);
   }
 }
 
 async buscarBajasMedicas(matricula: string): Promise<any> {
-  console.log("🔍 Llamando a buscarBajasMedicas con matrícula:", matricula);
   
   return await this.handleRequest(async () => {
     const url = `${this.baseUrl}/gestion/getCertificadoIncapacidadByParamMat/${matricula}`;

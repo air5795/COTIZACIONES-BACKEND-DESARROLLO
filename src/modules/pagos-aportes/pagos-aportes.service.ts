@@ -101,11 +101,7 @@ async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Pro
       console.log('Archivo guardado en:', filePath); 
     }
 
-    // Crear y guardar el nuevo pago
-    nuevoPago = this.pagoAporteRepository.create(pagoData);
-    await queryRunner.manager.save(nuevoPago);
-
-    // Actualizar la fecha_pago en planillas_aportes
+    // Actualizar la fecha_pago en planillas_aportes PRIMERO
     const idPlanilla = pagoData.id_planilla_aportes;
     if (idPlanilla) {
       const fechaPago = pagoData.fecha_pago ? new Date(pagoData.fecha_pago) : new Date();
@@ -115,6 +111,13 @@ async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Pro
         idPlanilla, 
         fechaPago
       );
+
+      // ✅ ASIGNAR EL TOTAL A CANCELAR AL PAGO
+      pagoData.total_a_cancelar = datosLiquidacion.total_a_cancelar;
+
+      // Crear y guardar el nuevo pago CON el total_a_cancelar
+      nuevoPago = this.pagoAporteRepository.create(pagoData);
+      await queryRunner.manager.save(nuevoPago);
 
       // Actualizar TODOS los campos calculados en la planilla
       await this.planillasAportesService.actualizarPlanillaConLiquidacion(
@@ -136,6 +139,7 @@ async createPago(pagoData: Partial<PagoAporte>, file?: Express.Multer.File): Pro
       console.log('Cálculo de demasía actualizado:', {
         montoPagado,
         totalCancelar,
+        totalCancelarGuardado: pagoData.total_a_cancelar,
         demasiaAnterior,
         totalConDescuento
       });
@@ -512,7 +516,8 @@ async obtenerDemasiaMesAnterior(idPlanillaActual: number): Promise<number> {
         COD_PATRONAL: pago.planilla?.cod_patronal || 'No disponible',
         COM_NRO: pago.planilla?.com_nro || 'No disponible',
         FECHA_PAGO: pago.fecha_pago ? moment(pago.fecha_pago).format('DD/MM/YYYY') : 'N/A',
-        MONTO_PAGADO: this.formatNumber(pago.monto_pagado),
+        /* MONTO_DESEMBOLSADO: this.formatNumber(pago.monto_pagado), */
+        MONTO_PAGADO: this.formatNumber(pago.total_a_cancelar),
         METODO_PAGO: pago.metodo_pago || 'N/A',
         COMPROBANTE_PAGO: pago.comprobante_pago || 'N/A',
         USUARIO_CREACION: pago.usuario_creacion || 'N/A',
@@ -525,6 +530,7 @@ async obtenerDemasiaMesAnterior(idPlanillaActual: number): Promise<number> {
         TIPO_PLANILLA: pago.planilla?.tipo_planilla || 'No disponible',
         TOTAL_IMPORTE_PLANILLA: this.formatNumber(pago.planilla?.total_importe), 
         TOTAL_TRABAJ_PLANILLA: pago.planilla?.total_trabaj || 0,
+        
       }));
 
       return {

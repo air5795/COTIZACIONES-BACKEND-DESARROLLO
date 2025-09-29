@@ -331,7 +331,7 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
         errores.push(`Fila ${fila}: El campo "Días pagados" no es un número válido. Valor encontrado: "${diasPagados}"`);
         return 0;
       }
-      if (dias < 1 || dias > 31) {
+      if (dias < 0 || dias > 31) {
         errores.push(`Fila ${fila}: El campo "Días pagados" debe estar entre 1 y 31 días. Valor encontrado: ${dias}`);
         return 0;
       }
@@ -515,7 +515,7 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
         fecha_retiro: row['Fecha de retiro'] ? validarFecha(row['Fecha de retiro'], 'Fecha de retiro', fila, erroresValidacion, false) : undefined,
         dias_pagados: validarDiasPagados(row['Días pagados'], fila, erroresValidacion),
 
-        haber_basico: validarCampoMonetario(row['Haber Básico'], 'Haber Básico', fila, erroresValidacion, true),
+        haber_basico: validarCampoMonetario(row['Haber Básico'], 'Haber Básico', fila, erroresValidacion, false),
         bono_antiguedad: validarCampoMonetario(row['Bono de antigüedad'], 'Bono de antigüedad', fila, erroresValidacion, false),
         monto_horas_extra: validarCampoMonetario(row['Monto horas extra'], 'Monto horas extra', fila, erroresValidacion, false),
         monto_horas_extra_nocturnas: validarCampoMonetario(row['Monto horas extra nocturnas'], 'Monto horas extra nocturnas', fila, erroresValidacion, false),
@@ -3620,7 +3620,7 @@ async actualizarConNuevoMontoTGN(idPlanilla: number, fechaPago: Date, nuevoMonto
     }
     
     // NUEVO: Guardar el pago del desembolso TGN
-    await this.guardarPagoDesembolsoTGN(idPlanilla, fechaPago, nuevoMontoTGN);
+    await this.guardarPagoDesembolsoTGN(idPlanilla, fechaPago, nuevoMontoTGN, datosBase.total_a_cancelar);
     
     console.log('✅ Empresa pública actualizada con nuevo TGN:', nuevoMontoTGN);
     console.log('💊 Descuento 5% aplicado:', descuentoMinSalud);
@@ -3647,7 +3647,7 @@ async recalcularLiquidacionPublica(idPlanilla: number, fechaPago: Date): Promise
     }
     
     // NUEVO: Guardar el pago del desembolso TGN (usando el aporte calculado)
-    await this.guardarPagoDesembolsoTGN(idPlanilla, fechaPago, datosLiquidacion.aporte_actualizado);
+    await this.guardarPagoDesembolsoTGN(idPlanilla, fechaPago, datosLiquidacion.aporte_actualizado, datosLiquidacion.total_a_cancelar);
     
     return datosLiquidacion;
   } catch (error) {
@@ -5122,7 +5122,7 @@ async obtenerDatosVerificacionGuardados(idPlanilla: number): Promise<any> {
 }
 
 //? MÉTODO PRIVADO: Guardar pago del desembolso TGN en pagos_aportes_mensuales
-private async guardarPagoDesembolsoTGN(idPlanilla: number, fechaPago: Date, montoTGN: number): Promise<void> {
+private async guardarPagoDesembolsoTGN(idPlanilla: number, fechaPago: Date, montoTGN: number , totalACancelar: number): Promise<void> {
   try {
     console.log('💾 Guardando pago del desembolso TGN en pagos_aportes_mensuales');
     
@@ -5136,7 +5136,8 @@ private async guardarPagoDesembolsoTGN(idPlanilla: number, fechaPago: Date, mont
       observaciones: 'Pago automático del desembolso TGN',
       estado: 1,
       estado_envio: null,
-      monto_demasia: null
+      monto_demasia: null,
+      total_a_cancelar: totalACancelar
     });
 
     await this.pagoAporteRepo.save(nuevoPago);

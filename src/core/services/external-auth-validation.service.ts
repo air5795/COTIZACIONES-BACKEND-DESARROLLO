@@ -23,7 +23,6 @@ export class ExternalAuthValidationService {
    */
   async validateToken(token: string): Promise<ValidateTokenResponse> {
     try {
-      console.log('🔐 Validando token contra sistema externo...');
 
       const response = await firstValueFrom(
         this.httpService.get(this.AUTH_VALIDATE_URL, {
@@ -33,12 +32,10 @@ export class ExternalAuthValidationService {
         }),
       );
 
-      console.log('✅ Token válido:', response.data);
       return response.data as ValidateTokenResponse;
 
     } catch (error) {
       if (error instanceof AxiosError) {
-        console.error('❌ Error al validar token:', error.response?.data);
 
         // Si el sistema externo devuelve 401
         if (error.response?.status === 401) {
@@ -54,7 +51,6 @@ export class ExternalAuthValidationService {
       }
 
       // Otros errores (timeout, red, etc.)
-      console.error('❌ Error de conexión con sistema de autenticación:', error.message);
       throw new HttpException(
         {
           message: 'Error al validar token con el sistema de autenticación',

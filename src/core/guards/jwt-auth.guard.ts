@@ -25,7 +25,6 @@ import {
       );
   
       if (isPublic) {
-        console.log('🌍 Ruta pública - acceso permitido sin autenticación');
         return true;
       }
   
@@ -36,14 +35,12 @@ import {
       const authHeader = request.headers.authorization;
       
       if (!authHeader) {
-        console.error('❌ No se proporcionó header Authorization');
         throw new UnauthorizedException('Token de autenticación requerido');
       }
   
       const token = this.authValidationService.extractTokenFromHeader(authHeader);
   
       if (!token) {
-        console.error('❌ Formato de token inválido');
         throw new UnauthorizedException('Formato de token inválido. Use: Bearer <token>');
       }
   
@@ -54,11 +51,9 @@ import {
         // 5. Adjuntar datos del usuario al request para usar en controllers
         request['user'] = userData;
         
-        console.log('✅ Usuario autenticado:', userData.username);
         return true;
   
       } catch (error) {
-        console.error('❌ Error en validación de token:', error.message);
         throw new UnauthorizedException('Token inválido o expirado');
       }
     }
