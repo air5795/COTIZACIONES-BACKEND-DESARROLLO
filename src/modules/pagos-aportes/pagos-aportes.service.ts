@@ -518,7 +518,7 @@ async obtenerDemasiaMesAnterior(idPlanillaActual: number): Promise<number> {
         COM_NRO: pago.planilla?.com_nro || 'No disponible',
         FECHA_PAGO: pago.fecha_pago ? moment(pago.fecha_pago).format('DD/MM/YYYY') : 'N/A',
         /* MONTO_DESEMBOLSADO: this.formatNumber(pago.monto_pagado), */
-        MONTO_PAGADO: this.formatNumber(pago.total_a_cancelar),
+        MONTO_PAGADO: this.formatNumber(pago.total_a_cancelar) || 'NULL',
         METODO_PAGO: pago.metodo_pago || 'N/A',
         COMPROBANTE_PAGO: pago.comprobante_pago || 'N/A',
         USUARIO_CREACION: pago.usuario_creacion || 'N/A',
@@ -531,7 +531,7 @@ async obtenerDemasiaMesAnterior(idPlanillaActual: number): Promise<number> {
         TIPO_PLANILLA: pago.planilla?.tipo_planilla || 'No disponible',
         TOTAL_IMPORTE_PLANILLA: this.formatNumber(pago.planilla?.total_importe), 
         TOTAL_TRABAJ_PLANILLA: pago.planilla?.total_trabaj || 0,
-        TOTAL_MULTAS: this.formatNumber(pago.planilla?.total_multas),
+        TOTAL_MULTAS: this.formatNumber(pago.planilla?.total_multas) || 'PLANILLA SIN MULTA',
         
       }));
 
