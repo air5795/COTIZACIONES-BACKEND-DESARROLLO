@@ -513,6 +513,7 @@ async obtenerDemasiaMesAnterior(idPlanillaActual: number): Promise<number> {
       const pagosFormateados = pagos.map((pago) => ({
         ID_PLANILLA_APORTES: pago.id_planilla_aportes,
         EMPRESA: pago.planilla?.empresa?.emp_nom || 'No disponible',
+        TIPO_EMPRESA: pago.planilla?.empresa?.tipo || 'No disponible',
         COD_PATRONAL: pago.planilla?.cod_patronal || 'No disponible',
         COM_NRO: pago.planilla?.com_nro || 'No disponible',
         FECHA_PAGO: pago.fecha_pago ? moment(pago.fecha_pago).format('DD/MM/YYYY') : 'N/A',
@@ -530,6 +531,7 @@ async obtenerDemasiaMesAnterior(idPlanillaActual: number): Promise<number> {
         TIPO_PLANILLA: pago.planilla?.tipo_planilla || 'No disponible',
         TOTAL_IMPORTE_PLANILLA: this.formatNumber(pago.planilla?.total_importe), 
         TOTAL_TRABAJ_PLANILLA: pago.planilla?.total_trabaj || 0,
+        TOTAL_MULTAS: this.formatNumber(pago.planilla?.total_multas),
         
       }));
 

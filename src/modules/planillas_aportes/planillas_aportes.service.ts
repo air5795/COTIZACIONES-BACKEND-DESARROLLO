@@ -172,12 +172,12 @@ async guardarPlanilla(data: any[], createPlanillaDto: CreatePlanillasAporteDto) 
           cod_patronal,
           fecha_planilla: fechaPlanilla,
           tipo_planilla: 'Mensual',
-          estado: 1,
+          estado: In([1, 2]),
         },
       });
 
       if (!planillaMensualExistente) {
-        throw new BadRequestException('Debe existir una planilla Mensual activa (estado = 1) antes de subir una Adicional.');
+        throw new BadRequestException('Debe existir una planilla Mensual activa (estado = 1 o 2) antes de subir una Adicional.');
       }
     } else if (tipo_planilla === 'Mensual') {
       // Validación para no duplicar planilla mensual (sin importar estado)
@@ -672,12 +672,12 @@ async actualizarDetallesPlanilla(id_planilla: number, data: any[], createPlanill
           where: {
             cod_patronal,
             tipo_planilla: 'Mensual',
-            estado: 1,
+            estado: In([1, 2]),
           },
         });
 
         if (!planillaMensualExistente) {
-          throw new BadRequestException('Debe existir una planilla Mensual activa (estado = 1) antes de subir una Adicional.');
+          throw new BadRequestException('Debe existir una planilla Mensual activa (estado = 1 o 2) antes de subir una Adicional.');
         }
       } else if (tipo_planilla === 'Mensual') {
         const planillaExistente = await queryRunner.manager.findOne(PlanillasAporte, {
@@ -2620,22 +2620,25 @@ async getUfvForDate(fecha: Date): Promise<number> {
     
     let fechaLimite: Date;
     
-    if (diasEnMesSiguiente >= 30) {
-      // Si el mes siguiente tiene 30 o más días, la fecha límite es el día 30 de ese mes
+    if (diasEnMesSiguiente === 31) {
+      // Si el mes siguiente tiene 31 días → límite el 31
+      fechaLimite = new Date(añoSiguiente, mesSiguienteCorregido, 31);
+      console.log(`📅 Mes siguiente tiene 31 días → Límite: día 31 del mes siguiente`);
+    } else if (diasEnMesSiguiente === 30) {
+      // Si el mes siguiente tiene 30 días → límite el 30
       fechaLimite = new Date(añoSiguiente, mesSiguienteCorregido, 30);
-      console.log(`📅 Mes siguiente tiene ${diasEnMesSiguiente} días (≥30) → Límite: día 30 del mes siguiente`);
+      console.log(`📅 Mes siguiente tiene 30 días → Límite: día 30 del mes siguiente`);
     } else {
-      // Si el mes siguiente tiene menos de 30 días, calculamos cuántos días faltan
+      // Si el mes siguiente tiene menos de 30 días (febrero)
       const diasFaltantes = 30 - diasEnMesSiguiente;
-      
-      // La fecha límite será en el mes posterior al mes siguiente
       const mesPosterior = mesSiguienteCorregido + 1;
       const añoPosterior = añoSiguiente + (mesPosterior > 11 ? 1 : 0);
       const mesPosteriorCorregido = mesPosterior > 11 ? 0 : mesPosterior;
-      
+    
       fechaLimite = new Date(añoPosterior, mesPosteriorCorregido, diasFaltantes);
       console.log(`📅 Mes siguiente tiene ${diasEnMesSiguiente} días (<30) → Faltan ${diasFaltantes} días → Límite: ${diasFaltantes} del mes posterior`);
     }
+    
     
     fechaLimite.setUTCHours(0, 0, 0, 0);
     
@@ -3604,7 +3607,8 @@ async actualizarConNuevoMontoTGN(idPlanilla: number, fechaPago: Date, nuevoMonto
                             (datosBase.intereses || 0) + 
                             (datosBase.multa_sobre_intereses || 0);
     
-    datosBase.total_a_cancelar_parcial = nuevoMontoTGN + multasEIntereses;
+    /* datosBase.total_a_cancelar_parcial = nuevoMontoTGN + multasEIntereses; */
+    datosBase.total_a_cancelar_parcial = nuevoMontoTGN + datosBase.monto_actualizado + multasEIntereses;
     datosBase.total_a_cancelar = datosBase.total_a_cancelar_parcial - datosBase.total_deducciones;
     datosBase.total_aportes_asuss = nuevoMontoTGN * 0.005;
     
