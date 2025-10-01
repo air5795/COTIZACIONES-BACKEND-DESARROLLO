@@ -320,14 +320,28 @@ export class ReembolsosIncapacidadesService {
 // TODO : CALCULO DE BAJAS 
 
 //8.- CALCULAR REEMBOLSO CON DATOS REALES ----------------------------------------------------------------------------------------
-/* async calcularReembolsoConDatosReales(calcularDto: any) {
+ async calcularReembolsoConDatosReales(calcularDto: any) {
   try {
     const { matricula, cod_patronal, mes, gestion, baja_medica } = calcularDto;
 
+    console.log('\n╔═══════════════════════════════════════════════════════════════════════════════╗');
+    console.log('║         INICIO DE CÁLCULO DE REEMBOLSO POR INCAPACIDAD                       ║');
+    console.log('╚═══════════════════════════════════════════════════════════════════════════════╝\n');
+
     // 1. Buscar datos del trabajador en planillas de aportes usando el método correcto
+    console.log('📋 PASO 1: BÚSQUEDA DE INFORMACIÓN EN PLANILLAS');
+    console.log('─'.repeat(80));
+    console.log(`   • Código Patronal: ${cod_patronal}`);
+    console.log(`   • Mes: ${mes}`);
+    console.log(`   • Gestión: ${gestion}`);
+    console.log(`   • Matrícula buscada: ${matricula}`);
+    console.log('');
+
     const detallesTrabajador = await this.planillasService.obtenerDetallesDeMes(
       cod_patronal, mes, gestion
     );
+
+    console.log(`   ✓ Planilla encontrada con ${detallesTrabajador.length} trabajador(es)\n`);
 
     // 2. Buscar el trabajador específico por matrícula
     const trabajador = detallesTrabajador.find(
@@ -335,6 +349,7 @@ export class ReembolsosIncapacidadesService {
     );
 
     if (!trabajador) {
+      console.log(`   ✗ ERROR: No se encontró el trabajador con matrícula ${matricula}\n`);
       throw new NotFoundException(
         `No se encontró el trabajador con matrícula ${matricula} en la planilla de ${mes}/${gestion}`
       );
@@ -346,7 +361,7 @@ export class ReembolsosIncapacidadesService {
       apellido_paterno: trabajador.apellido_paterno,
       apellido_materno: trabajador.apellido_materno,
       nombres: trabajador.nombres,
-      salario_total: Number(trabajador.salario), // Total ganado real
+      salario_total: Number(trabajador.salario),
       haber_basico: Number(trabajador.haber_basico || 0),
       bono_antiguedad: Number(trabajador.bono_antiguedad || 0),
       horas_extra: Number(trabajador.monto_horas_extra || 0),
@@ -357,8 +372,31 @@ export class ReembolsosIncapacidadesService {
       matricula: trabajador.matricula
     };
 
+    console.log('👤 PASO 2: DATOS DEL TRABAJADOR ENCONTRADO');
+    console.log('─'.repeat(80));
+    console.log(`   • Nombre Completo: ${datosReales.apellido_paterno} ${datosReales.apellido_materno} ${datosReales.nombres}`);
+    console.log(`   • CI: ${datosReales.ci}`);
+    console.log(`   • Matrícula: ${datosReales.matricula}`);
+    console.log(`   • Cargo: ${datosReales.cargo}`);
+    console.log(`   • Días pagados en la planilla: ${datosReales.dias_pagados}`);
+    console.log('');
+    console.log('   💰 INFORMACIÓN SALARIAL:');
+    console.log(`      ├─ Haber Básico: Bs. ${datosReales.haber_basico.toFixed(2)}`);
+    console.log(`      ├─ Bono Antigüedad: Bs. ${datosReales.bono_antiguedad.toFixed(2)}`);
+    console.log(`      ├─ Horas Extra: Bs. ${datosReales.horas_extra.toFixed(2)}`);
+    console.log(`      ├─ Horas Extra Nocturnas: Bs. ${datosReales.horas_extra_nocturnas.toFixed(2)}`);
+    console.log(`      ├─ Otros Bonos: Bs. ${datosReales.otros_bonos.toFixed(2)}`);
+    console.log(`      └─ 💵 SALARIO TOTAL: Bs. ${datosReales.salario_total.toFixed(2)}`);
+    console.log('');
+    console.log('   📊 ORIGEN DE LOS DATOS:');
+    console.log(`      └─ Planilla de ${mes}/${gestion} - Código Patronal: ${cod_patronal}\n`);
+
     // 4. Realizar cálculos según PDF (casos complejos)
     const calculoDetallado = await this.calcularSegunCasosPDF(baja_medica, datosReales, mes, gestion);
+
+    console.log('╔═══════════════════════════════════════════════════════════════════════════════╗');
+    console.log('║         CÁLCULO DE REEMBOLSO FINALIZADO EXITOSAMENTE                         ║');
+    console.log('╚═══════════════════════════════════════════════════════════════════════════════╝\n');
 
     return {
       mensaje: 'Cálculo realizado exitosamente',
@@ -368,83 +406,37 @@ export class ReembolsosIncapacidadesService {
     };
 
   } catch (error) {
-    console.error('Error al calcular reembolso:', error);
-    throw error;
-  }
-} */
-
-//8.- CALCULAR REEMBOLSO CON DATOS QUEMADOS ----------------------------------------------------------------------------------------
- async calcularReembolsoConDatosReales(calcularDto: any) {
-  try {
-    const { matricula, cod_patronal, mes, gestion, baja_medica } = calcularDto;
-
-    // TEMPORALMENTE COMENTAMOS LA VALIDACIÓN DE PLANILLAS
-    
-    // 1. Buscar datos del trabajador en planillas de aportes usando el método correcto
-/*     const detallesTrabajador = await this.planillasService.obtenerDetallesDeMes(
-      cod_patronal, mes, gestion
-    );
-
-    // 2. Buscar el trabajador específico por matrícula
-    const trabajador = detallesTrabajador.find(
-      (detalle: any) => detalle.matricula === matricula
-    );
-
-    if (!trabajador) {
-      throw new NotFoundException(
-        `No se encontró el trabajador con matrícula ${matricula} en la planilla de ${mes}/${gestion}`
-      );
-    } */
-    
-
-    // DATOS TEMPORALES 
-    const ci = matricula.split(' ')[0];
-    const datosReales = {
-      ci: ci,
-      apellido_paterno: 'APELLIDO_PATERNO', 
-      apellido_materno: 'APELLIDO_MATERNO', 
-      nombres: 'NOMBRES_COMPLETOS',         
-      salario_total: 9151,                  
-      haber_basico: 9151,                  
-      bono_antiguedad: 0,                 
-      horas_extra: 0,                     
-      horas_extra_nocturnas: 0,           
-      otros_bonos: 0,                       
-      dias_pagados: 30,                     
-      cargo: 'CARGO_TEMPORAL',              
-      matricula: matricula
-    };
-
-    // calculos 
-    const calculoDetallado = await this.calcularSegunCasosPDF(baja_medica, datosReales, mes, gestion);
-    console.log('calculoDetallado', calculoDetallado);
-
-    return {
-      mensaje: 'Cálculo realizado exitosamente (MODO TEMPORAL)',
-      datos_trabajador: datosReales,
-      baja_medica: baja_medica,
-      calculo: calculoDetallado
-    };
-
-  } catch (error) {
-    console.error('Error al calcular reembolso:', error);
+    console.error('\n❌ ERROR EN EL CÁLCULO DE REEMBOLSO:', error.message);
+    console.error('═'.repeat(80) + '\n');
     throw error;
   }
 } 
+
+
 //MÉTODO AUXILIAR PARA CÁLCULOS SEGÚN PDF ----------------------------------------------------------------------------------------
  private async calcularSegunCasosPDF(bajaMedica: any, datosWorker: any, mesReembolso: string, gestionReembolso: string) {
+  
+  console.log('🔢 PASO 3: PROCESO DE CÁLCULO DE REEMBOLSO');
+  console.log('─'.repeat(80));
+  
   // Extraer fechas de la baja médica
   const fechaInicioBaja = new Date(bajaMedica.DIA_DESDE);
   const fechaFinBaja = new Date(bajaMedica.DIA_HASTA);
+  
+  console.log('   📅 FECHAS DE LA BAJA MÉDICA:');
+  console.log(`      ├─ Fecha Inicio: ${fechaInicioBaja.toLocaleDateString('es-BO')} (${bajaMedica.DIA_DESDE})`);
+  console.log(`      └─ Fecha Fin: ${fechaFinBaja.toLocaleDateString('es-BO')} (${bajaMedica.DIA_HASTA})`);
+  console.log('');
   
   // CALCULAR DÍAS CORRECTAMENTE (fecha fin - fecha inicio, SIN incluir último día)
   const milisecondsDiff = fechaFinBaja.getTime() - fechaInicioBaja.getTime();
   const diasCalculados = Math.floor(milisecondsDiff / (1000 * 60 * 60 * 24));
   
-  console.log('fechaInicioBaja', fechaInicioBaja);
-  console.log('fechaFinBaja', fechaFinBaja);
-  console.log('diasCalculados', diasCalculados);
-  console.log('DIAS_IMPEDIMENTO original', bajaMedica.DIAS_IMPEDIMENTO);
+  console.log('   🧮 CÁLCULO DE DÍAS:');
+  console.log(`      ├─ Días impedimento (original): ${bajaMedica.DIAS_IMPEDIMENTO || 'N/A'} días`);
+  console.log(`      ├─ Diferencia en milisegundos: ${milisecondsDiff}`);
+  console.log(`      └─ Días calculados (fin - inicio): ${diasCalculados} días`);
+  console.log('');
   
   // Usar días calculados en lugar del DIAS_IMPEDIMENTO
   const diasTotalesIncapacidad = diasCalculados;
@@ -461,30 +453,61 @@ export class ReembolsosIncapacidadesService {
   
   const porcentajeReembolso = porcentajes[tipoIncapacidad] || 75;
   
+  console.log('   📋 TIPO DE INCAPACIDAD:');
+  console.log(`      ├─ Tipo: ${tipoIncapacidad}`);
+  console.log(`      └─ Porcentaje de reembolso: ${porcentajeReembolso}%`);
+  console.log('');
+  
   // Calcular días de reembolso según tipo
   let diasReembolso = 0;
+  let explicacionCalculo = '';
   
   if (tipoIncapacidad === 'ENFERMEDAD') {
     // Para enfermedad común, se descuentan los primeros 3 días
     diasReembolso = Math.max(0, diasTotalesIncapacidad - 3);
+    explicacionCalculo = `Enfermedad común: ${diasTotalesIncapacidad} días - 3 días de carencia = ${diasReembolso} días`;
   } else if (tipoIncapacidad === 'MATERNIDAD') {
     // Para maternidad, máximo 90 días
+    const diasAntesLimite = diasTotalesIncapacidad;
     diasReembolso = Math.min(diasTotalesIncapacidad, 90);
+    if (diasAntesLimite > 90) {
+      explicacionCalculo = `Maternidad: ${diasAntesLimite} días (se aplica límite de 90 días) = ${diasReembolso} días`;
+    } else {
+      explicacionCalculo = `Maternidad: ${diasTotalesIncapacidad} días (dentro del límite de 90 días)`;
+    }
   } else if (tipoIncapacidad === 'PROFESIONAL') {
     // Para riesgo profesional, todos los días desde el primer día
     diasReembolso = diasTotalesIncapacidad;
+    explicacionCalculo = `Riesgo profesional: todos los días sin carencia = ${diasReembolso} días`;
   }
+  
+  console.log('   ⏱️  DÍAS A REEMBOLSAR:');
+  console.log(`      ├─ Días totales de incapacidad: ${diasTotalesIncapacidad} días`);
+  console.log(`      ├─ Lógica aplicada: ${explicacionCalculo}`);
+  console.log(`      └─ Días de reembolso final: ${diasReembolso} días`);
+  console.log('');
   
   // Cálculos financieros
   const salarioDiario = datosWorker.salario_total / 30; // Mes comercial
   const montoReembolso = (salarioDiario * diasReembolso * porcentajeReembolso) / 100;
   
-  console.log('tipoIncapacidad', tipoIncapacidad);
-  console.log('diasTotalesIncapacidad', diasTotalesIncapacidad);
-  console.log('diasReembolso', diasReembolso);
-  console.log('porcentajeReembolso', porcentajeReembolso);
-  console.log('salarioDiario', salarioDiario);
-  console.log('montoReembolso', montoReembolso);
+  console.log('   💰 CÁLCULOS FINANCIEROS:');
+  console.log(`      ├─ Salario mensual del trabajador: Bs. ${datosWorker.salario_total.toFixed(2)}`);
+  console.log(`      ├─ Salario diario (base 30 días): Bs. ${salarioDiario.toFixed(6)}`);
+  console.log(`      ├─ Fórmula: (Salario Diario × Días Reembolso × Porcentaje) / 100`);
+  console.log(`      ├─ Cálculo: (${salarioDiario.toFixed(6)} × ${diasReembolso} × ${porcentajeReembolso}) / 100`);
+  console.log(`      └─ 💵 MONTO REEMBOLSO: Bs. ${montoReembolso.toFixed(2)}`);
+  console.log('');
+  
+  console.log('   ✅ RESUMEN DEL CÁLCULO:');
+  console.log('   ┌─────────────────────────────────────────────────────────┐');
+  console.log(`   │ Tipo: ${tipoIncapacidad.padEnd(48)} │`);
+  console.log(`   │ Días incapacidad: ${String(diasTotalesIncapacidad).padEnd(38)} │`);
+  console.log(`   │ Días a reembolsar: ${String(diasReembolso).padEnd(37)} │`);
+  console.log(`   │ Porcentaje: ${String(porcentajeReembolso + '%').padEnd(43)} │`);
+  console.log(`   │ Monto total: Bs. ${String(montoReembolso.toFixed(2)).padEnd(37)} │`);
+  console.log('   └─────────────────────────────────────────────────────────┘');
+  console.log('');
   
   return {
     tipo_incapacidad: tipoIncapacidad,
